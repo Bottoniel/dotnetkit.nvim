@@ -1,0 +1,80 @@
+local dotnet = require("csnew.dotnet")
+local reference = require("csnew.reference")
+
+local M = {}
+
+function M.parse_diagnostics(text)
+	local items = {}
+	for line in (text or ""):gmatch("[^\r\n]+") do
+		local file, lnum, col, kind, code, msg =
+			line:match("^(.-)%((%d+),(%d+)%)%s*:%s*(%a+)%s+(%S+):%s+(.*)$")
+		if file and (kind == "error" or kind == "warning") then
+			msg = msg:gsub("%s*%[.-%]%s*$", "")
+			table.insert(items, {
+				filename = file,
+				lnum = tonumber(lnum),
+				col = tonumber(col),
+				type = kind == "error" and "E" or "W",
+				text = code .. ": " .. msg,
+			})
+		end
+	end
+	return items
+end
+
+local function resolve_target(preset, cb)
+	if preset and preset ~= "" then
+		cb(dotnet.normalize(preset))
+		return
+	end
+	local solutions = dotnet.find_solutions(dotnet.workspace_root())
+	if #solutions == 1 then
+		cb(solutions[1])
+		return
+	end
+	if #solutions > 1 then
+		dotnet.pick_solution(cb)
+		return
+	end
+	local current = reference.current_project()
+	if current then
+		cb(current)
+		return
+	end
+	vim.notify("csnew: no .sln or .csproj to build", vim.log.levels.ERROR)
+end
+
+function M.run(opts)
+	opts = opts or {}
+	resolve_target(opts.target, function(target)
+		dotnet.run({ "build", target, "--nologo", "-v", "q" }, function(_, stdout, stderr)
+			local items = M.parse_diagnostics((stdout or "") .. "\n" .. (stderr or ""))
+			vim.fn.setqflist({}, "r", { title = "dotnet build " .. vim.fn.fnamemodify(target, ":t"), items = items })
+			local errors = 0
+			local warnings = 0
+			for _, item in ipairs(items) do
+				if item.type == "E" then
+					errors = errors + 1
+				else
+					warnings = warnings + 1
+				end
+			end
+			if errors > 0 then
+				vim.cmd("copen")
+				vim.notify(
+					("csnew: build failed (%d error(s), %d warning(s))"):format(errors, warnings),
+					vim.log.levels.ERROR
+				)
+			else
+				vim.cmd("cclose")
+				vim.notify(("csnew: build succeeded (%d warning(s))"):format(warnings), vim.log.levels.INFO)
+			end
+		end, {
+			progress_msg = "csnew: building " .. vim.fn.fnamemodify(target, ":t"),
+			success_msg = false,
+			fail_msg = false,
+		})
+	end)
+end
+
+return M
