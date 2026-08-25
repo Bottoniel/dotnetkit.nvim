@@ -230,22 +230,38 @@ Mark `dotnetkit.nvim` as a dependency of nvim-tree so the module is available wh
 
 ## Configuration
 
+You do **not** call `setup()` in a random file. With lazy.nvim it goes in the plugin spec as `opts`. Lazy runs `require("csnew").setup(opts)` for you.
+
+Most people only need this (already in the recommended spec):
+
 ```lua
-require("csnew").setup({
-	dotnet = {
-		-- run after sln / reference / package changes (on the .sln)
-		after_change = { "clean", "restore", "lsp_restart" },
-	},
-	ef = {
-		project = "src/MyApp.Data",          -- --project (relative to git root or absolute)
-		startup_project = "src/MyApp.Api",   -- --startup-project
-		context = "AppDbContext",            -- --context when several DbContexts exist
-		output_dir = "Migrations",           -- -o for migrations add
-		script_output = "Migrations.sql",    -- :EfScript output
-		script_idempotent = true,            -- false for SQLite (no idempotent scripts)
-	},
-})
+{
+	"Bottoniel/dotnetkit.nvim",
+	-- ...
+	opts = {},
+}
 ```
+
+That enables snippets and default `after_change`. To override defaults, put the table **inside `opts`**:
+
+```lua
+{
+	"Bottoniel/dotnetkit.nvim",
+	-- ...
+	opts = {
+		dotnet = {
+			-- after sln / reference / package changes (runs on the .sln)
+			after_change = { "clean", "restore", "lsp_restart" },
+		},
+		ef = {
+			-- optional globals; better set per repo in .csnew.lua (below)
+			script_idempotent = true, -- false for SQLite
+		},
+	},
+}
+```
+
+Do **not** put `ef.project` / `ef.startup_project` here if you work on more than one solution — those paths belong in `.csnew.lua` at each repo root.
 
 All `ef.*` keys are optional. With nothing set:
 
