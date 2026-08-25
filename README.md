@@ -112,9 +112,100 @@ Snippets + a keymap. Debug is a separate spec (see below).
 }
 ```
 
-### Full workspace (debug + pickers)
+## Recommended companion setup
 
-csnew does **not** install nvim-dap for you. Add a companion spec and install `netcoredbg` (Mason: `:MasonInstall netcoredbg`).
+These are **not** part of this plugin. Copy them into **your** Neovim config (lazy spec files) if you want the same workflow: Telescope pickers, format on save, Mason tools, and debug UI.
+
+| What | Where (your config) | Add |
+|---|---|---|
+| Pickers in Telescope | spec of **telescope.nvim** | `telescope-ui-select` |
+| Format on save for `.cs` | spec of **conform.nvim** | `cs = { "csharpier" }` |
+| Install formatter + debugger | spec of **mason-tool-installer** | `csharpier`, `netcoredbg` |
+| Debug UI / keymaps | **new** spec, e.g. `lua/plugins/dap.lua` | nvim-dap + nvim-dap-ui |
+| `:CsNew` on the tree node | spec of **nvim-tree** | `on_attach` (see [nvim-tree](#optional-nvim-tree)) |
+
+### Telescope pickers
+
+Edit the lazy spec where you already configure Telescope (not this plugin). Three additions:
+
+```lua
+{
+	"nvim-telescope/telescope.nvim",
+	dependencies = {
+		-- ...your other deps
+		"nvim-telescope/telescope-ui-select.nvim",
+	},
+	config = function()
+		local telescope = require("telescope")
+		telescope.setup({
+			extensions = {
+				["ui-select"] = require("telescope.themes").get_dropdown({}),
+			},
+			-- ...your defaults
+		})
+		telescope.load_extension("ui-select")
+	end,
+}
+```
+
+After this, every `vim.ui.select` from the plugin (`:CsAddRef`, `:EfMigrate`, …) opens in Telescope.
+
+### Format on save (C#)
+
+This is **not** a C# project file. It goes in your **conform.nvim** spec (e.g. `lua/plugins/formatting.lua` or whatever file already has `stevearc/conform.nvim`).
+
+If you already use conform, add one line to `formatters_by_ft` and keep `format_on_save`:
+
+```lua
+conform.setup({
+	formatters_by_ft = {
+		-- ...your other filetypes
+		cs = { "csharpier" },
+	},
+	format_on_save = {
+		lsp_fallback = true,
+		async = false,
+		timeout_ms = 3000,
+	},
+})
+```
+
+If you do not have conform yet:
+
+```lua
+{
+	"stevearc/conform.nvim",
+	event = { "BufReadPre", "BufNewFile" },
+	config = function()
+		require("conform").setup({
+			formatters_by_ft = { cs = { "csharpier" } },
+			format_on_save = { lsp_fallback = true, async = false, timeout_ms = 3000 },
+		})
+	end,
+}
+```
+
+Install the binary with Mason (`csharpier` below) or `:MasonInstall csharpier`.
+
+### Mason (csharpier + netcoredbg)
+
+Edit the spec where you call `mason-tool-installer` (often next to mason.nvim, e.g. `lua/plugins/lsp/mason.lua`):
+
+```lua
+require("mason-tool-installer").setup({
+	ensure_installed = {
+		-- ...your other tools
+		"csharpier",
+		"netcoredbg",
+	},
+})
+```
+
+Or install once by hand: `:MasonInstall csharpier` and `:MasonInstall netcoredbg`.
+
+### Debug (nvim-dap)
+
+dotnetkit does **not** install nvim-dap. Add a **new** lazy spec (e.g. `lua/plugins/dap.lua`):
 
 ```lua
 {
@@ -153,7 +244,7 @@ csnew does **not** install nvim-dap for you. Add a companion spec and install `n
 }
 ```
 
-For Telescope pickers instead of the default `vim.ui.select`, add `nvim-telescope/telescope-ui-select.nvim` and `telescope.load_extension("ui-select")`.
+Needs `netcoredbg` (Mason, above). Then `:CsBuild` → breakpoint → `<leader>dr`.
 
 ## Commands
 
