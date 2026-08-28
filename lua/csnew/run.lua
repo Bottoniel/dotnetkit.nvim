@@ -61,23 +61,39 @@ local function stop_job()
 	end
 end
 
-local function start_term(args)
+local function open_term(cmd, opts)
+	if vim.fn.has("nvim-0.11") == 1 then
+		return vim.fn.jobstart(cmd, vim.tbl_extend("force", opts, { term = true }))
+	end
+	return vim.fn.termopen(cmd, opts)
+end
+
+local function start_term(args, cwd)
 	stop_job()
 	local cmd = { "dotnet", unpack(args) }
+	cwd = cwd or dotnet.workspace_root()
+	local win
 	if vim.api.nvim_buf_is_valid(term_buf) then
-		for _, win in ipairs(vim.api.nvim_list_wins()) do
-			if vim.api.nvim_win_get_buf(win) == term_buf then
-				vim.api.nvim_set_current_win(win)
-				job_id = vim.fn.termopen(cmd, { cwd = dotnet.workspace_root() })
-				return
+		for _, w in ipairs(vim.api.nvim_list_wins()) do
+			if vim.api.nvim_win_get_buf(w) == term_buf then
+				win = w
+				break
 			end
 		end
 	end
-	vim.cmd("botright vsplit")
-	term_buf = vim.api.nvim_create_buf(true, false)
-	vim.api.nvim_win_set_buf(0, term_buf)
-	vim.api.nvim_win_set_width(0, math.max(40, math.floor(vim.o.columns * 0.4)))
-	job_id = vim.fn.termopen(cmd, { cwd = dotnet.workspace_root() })
+	if win then
+		vim.api.nvim_set_current_win(win)
+		local new_buf = vim.api.nvim_create_buf(true, false)
+		vim.api.nvim_win_set_buf(win, new_buf)
+		pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
+		term_buf = new_buf
+	else
+		vim.cmd("botright vsplit")
+		term_buf = vim.api.nvim_create_buf(true, false)
+		vim.api.nvim_win_set_buf(0, term_buf)
+		vim.api.nvim_win_set_width(0, math.max(40, math.floor(vim.o.columns * 0.4)))
+	end
+	job_id = open_term(cmd, { cwd = cwd })
 end
 
 local function with_profile(kind, pair)
