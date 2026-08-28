@@ -95,7 +95,7 @@ function M.list(opts)
 		if not target then
 			return
 		end
-		dotnet.run({ "list", target, "package", "--outdated", "--format", "json" }, function(ok, stdout)
+		dotnet.run({ "list", target, "package", "--format", "json" }, function(ok, stdout)
 			if not ok then
 				return
 			end
@@ -104,14 +104,39 @@ function M.list(opts)
 				vim.notify("csnew: no packages found", vim.log.levels.WARN)
 				return
 			end
-			local lines = { "Package                          Current    Latest", string.rep("-", 56) }
 			for _, row in ipairs(rows) do
-				table.insert(
-					lines,
-					string.format("%-32s %-10s %s", row.id, row.resolved, row.latest ~= row.resolved and row.latest or "")
-				)
+				row.latest = ""
 			end
-			ui.open_scratch("csnew://packages", lines)
+			local function show()
+				local lines = { "Package                          Current    Latest", string.rep("-", 56) }
+				for _, row in ipairs(rows) do
+					table.insert(
+						lines,
+						string.format("%-32s %-10s %s", row.id, row.resolved, row.latest ~= row.resolved and row.latest or "")
+					)
+				end
+				ui.open_scratch("csnew://packages", lines)
+			end
+			dotnet.run({ "list", target, "package", "--outdated", "--format", "json" }, function(ok2, stdout2)
+				if not ok2 then
+					vim.notify("csnew: could not check for newer versions", vim.log.levels.WARN)
+					show()
+					return
+				end
+				local latest_by_id = {}
+				for _, row in ipairs(M.parse_list_json(stdout2)) do
+					latest_by_id[row.id] = row.latest
+				end
+				for _, row in ipairs(rows) do
+					if latest_by_id[row.id] then
+						row.latest = latest_by_id[row.id]
+					end
+				end
+				show()
+			end, {
+				success_msg = false,
+				fail_msg = false,
+			})
 		end, {
 			progress_msg = "csnew: listing packages",
 			success_msg = false,
