@@ -98,8 +98,9 @@ end
 
 local function with_profile(kind, pair)
 	local profiles = M.parse_launch_profiles(launch_settings_path(pair.startup or pair.project))
+	local cwd = project_dir(pair.project)
 	local function go(profile)
-		start_term(M.compose_args(kind, pair.project, profile))
+		start_term(M.compose_args(kind, pair.project, profile), cwd)
 	end
 	if #profiles == 0 then
 		go(nil)
