@@ -39,15 +39,23 @@ function M.relative(from, to)
 	return ""
 end
 
-function M.find_csproj(start_dir)
+function M.find_csproj(start_dir, stop_at)
+	stop_at = normalize_dir(stop_at or require("csnew.dotnet").workspace_root())
 	local dir = normalize_dir(start_dir)
 	if vim.fn.isdirectory(dir) == 0 then
 		dir = vim.fn.fnamemodify(dir, ":h")
 	end
+	local prefix = stop_at .. "/"
 	while dir and dir ~= "" do
+		if dir ~= stop_at and dir:sub(1, #prefix) ~= prefix then
+			break
+		end
 		local found = vim.fn.glob(dir .. "/*.csproj", false, true)
 		if #found > 0 then
 			return found[1]
+		end
+		if dir == stop_at then
+			break
 		end
 		local parent = vim.fn.fnamemodify(dir, ":h")
 		if parent == dir then
