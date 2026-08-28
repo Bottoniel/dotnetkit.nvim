@@ -1,5 +1,7 @@
 local M = {}
 
+local autocmd_id
+
 local prefixes = {
 	{ trig = "cls", kind = "class", desc = "class + namespace" },
 	{ trig = "iface", kind = "interface", desc = "interface + namespace" },
@@ -27,6 +29,16 @@ function M.register()
 	end
 	local ok, ls = pcall(require, "luasnip")
 	if not ok then
+		if not autocmd_id then
+			local group = vim.api.nvim_create_augroup("CsnewSnippets", { clear = true })
+			autocmd_id = vim.api.nvim_create_autocmd("FileType", {
+				group = group,
+				pattern = "cs",
+				callback = function()
+					M.register()
+				end,
+			})
+		end
 		return
 	end
 
@@ -51,6 +63,10 @@ function M.register()
 	end
 
 	ls.add_snippets("cs", snippets, { key = "csnew" })
+	if autocmd_id then
+		pcall(vim.api.nvim_del_autocmd, autocmd_id)
+		autocmd_id = nil
+	end
 	vim.g.csnew_snippets_loaded = true
 end
 
