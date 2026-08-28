@@ -5,7 +5,14 @@ local projects = require("csnew.projects")
 local M = {}
 
 local function netcoredbg_path()
-	local mason = vim.fn.stdpath("data") .. "/mason/bin/netcoredbg"
+	local mason_dir = vim.fn.stdpath("data") .. "/mason/bin/"
+	if vim.fn.has("win32") == 1 then
+		local exe = mason_dir .. "netcoredbg.exe"
+		if vim.fn.executable(exe) == 1 then
+			return exe
+		end
+	end
+	local mason = mason_dir .. "netcoredbg"
 	if vim.fn.executable(mason) == 1 then
 		return mason
 	end
