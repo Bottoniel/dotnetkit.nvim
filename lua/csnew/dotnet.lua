@@ -93,8 +93,11 @@ end
 
 function M.relative_display(path, root)
 	root = root or M.workspace_root()
-	local rel = path:gsub("^" .. root .. "/", "")
-	return rel
+	local prefix = root .. "/"
+	if path:sub(1, #prefix) == prefix then
+		return path:sub(#prefix + 1)
+	end
+	return path
 end
 
 function M.pick_solution(cb)
