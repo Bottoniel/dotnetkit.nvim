@@ -22,18 +22,24 @@ end
 
 function M.parse_diagnostics(text)
 	local items = {}
+	local seen = {}
 	for line in (text or ""):gmatch("[^\r\n]+") do
 		local file, lnum, col, kind, code, msg =
 			line:match("^(.-)%((%d+),(%d+)%)%s*:%s*(%a+)%s+(%S+):%s+(.*)$")
 		if file and (kind == "error" or kind == "warning") then
 			msg = msg:gsub("%s*%[.-%]%s*$", "")
-			table.insert(items, {
-				filename = file,
-				lnum = tonumber(lnum),
-				col = tonumber(col),
-				type = kind == "error" and "E" or "W",
-				text = code .. ": " .. msg,
-			})
+			local item_text = code .. ": " .. msg
+			local key = file .. ":" .. lnum .. ":" .. col .. ":" .. item_text
+			if not seen[key] then
+				seen[key] = true
+				table.insert(items, {
+					filename = file,
+					lnum = tonumber(lnum),
+					col = tonumber(col),
+					type = kind == "error" and "E" or "W",
+					text = item_text,
+				})
+			end
 		end
 	end
 	return items
