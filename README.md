@@ -363,6 +363,8 @@ All `ef.*` keys are optional. With nothing set:
 
 Put this file at the **git root** (same folder as `.git` / the `.sln`). Same schema as `setup()`. It **overrides** the global setup (deep merge: defaults < `setup()` < `.csnew.lua`).
 
+The first time Neovim sees the file it will ask you to trust it (same prompt as `exrc`). Deny and pickers still work; the choice is remembered for the session while the file is unchanged. The file is evaluated in an empty environment: it may only `return` a table literal, it cannot call Neovim APIs.
+
 ```lua
 -- .csnew.lua
 return {
