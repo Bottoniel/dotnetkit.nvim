@@ -96,11 +96,11 @@ local function start_term(args, cwd)
 	job_id = open_term(cmd, { cwd = cwd })
 end
 
-local function with_profile(kind, pair)
-	local profiles = M.parse_launch_profiles(launch_settings_path(pair.startup or pair.project))
-	local cwd = project_dir(pair.project)
+local function with_profile(kind, project)
+	local profiles = M.parse_launch_profiles(launch_settings_path(project))
+	local cwd = project_dir(project)
 	local function go(profile)
-		start_term(M.compose_args(kind, pair.project, profile), cwd)
+		start_term(M.compose_args(kind, project, profile), cwd)
 	end
 	if #profiles == 0 then
 		go(nil)
@@ -119,24 +119,20 @@ end
 
 function M.run(opts)
 	opts = opts or {}
-	if opts.project then
-		with_profile("run", { project = dotnet.normalize(opts.project), startup = opts.project })
-		return
-	end
-	projects.pick_pair(function(pair)
-		with_profile("run", pair)
-	end, { project = "Run project:", startup = "Startup project:", confirm = "Run:" })
+	projects.resolve_current_or_pick("Run project:", opts.project, function(project)
+		if project then
+			with_profile("run", project)
+		end
+	end)
 end
 
 function M.watch(opts)
 	opts = opts or {}
-	if opts.project then
-		with_profile("watch", { project = dotnet.normalize(opts.project), startup = opts.project })
-		return
-	end
-	projects.pick_pair(function(pair)
-		with_profile("watch", pair)
-	end, { project = "Watch project:", startup = "Startup project:", confirm = "Watch:" })
+	projects.resolve_current_or_pick("Watch project:", opts.project, function(project)
+		if project then
+			with_profile("watch", project)
+		end
+	end)
 end
 
 function M.stop()
