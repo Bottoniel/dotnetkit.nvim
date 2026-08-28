@@ -51,6 +51,7 @@ function M.create(opts)
 			if not ok then
 				return
 			end
+			dotnet.invalidate_cache()
 			local csproj = outdir .. "/" .. name .. ".csproj"
 			if vim.fn.filereadable(csproj) ~= 1 then
 				local found = vim.fn.glob(outdir .. "/*.csproj", false, true)

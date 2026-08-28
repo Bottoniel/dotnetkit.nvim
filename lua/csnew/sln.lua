@@ -21,6 +21,7 @@ function M.add(opts)
 			end
 			dotnet.run({ "sln", sln, "add", project }, function(ok)
 				if ok then
+					dotnet.invalidate_cache()
 					dotnet.post_change(sln)
 				end
 			end, { success_msg = "csnew: added to solution " .. vim.fn.fnamemodify(project, ":t") })
@@ -53,6 +54,7 @@ function M.add(opts)
 			if choice then
 				dotnet.run({ "sln", sln, "add", choice }, function(ok)
 					if ok then
+						dotnet.invalidate_cache()
 						dotnet.post_change(sln)
 					end
 				end, { success_msg = "csnew: added to solution " .. vim.fn.fnamemodify(choice, ":t") })
@@ -74,6 +76,7 @@ function M.remove(opts)
 			local project = dotnet.normalize(opts.project)
 			dotnet.run({ "sln", sln, "remove", project }, function(ok)
 				if ok then
+					dotnet.invalidate_cache()
 					dotnet.post_change(sln)
 				end
 			end, { success_msg = "csnew: removed from solution " .. vim.fn.fnamemodify(project, ":t") })
@@ -89,6 +92,7 @@ function M.remove(opts)
 			if choice then
 				dotnet.run({ "sln", sln, "remove", choice.path }, function(ok)
 					if ok then
+						dotnet.invalidate_cache()
 						dotnet.post_change(sln)
 					end
 				end, { success_msg = "csnew: removed from solution " .. choice.name })

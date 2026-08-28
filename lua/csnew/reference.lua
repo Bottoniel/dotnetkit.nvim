@@ -26,6 +26,7 @@ function M.add(opts)
 		end
 		dotnet.run({ "add", target, "reference", reference }, function(ok)
 			if ok then
+				dotnet.invalidate_cache()
 				dotnet.post_change_with_solution()
 			end
 		end, { success_msg = "csnew: added reference " .. vim.fn.fnamemodify(reference, ":t") })
@@ -58,6 +59,7 @@ function M.add(opts)
 		if choice then
 			dotnet.run({ "add", target, "reference", choice }, function(ok)
 				if ok then
+					dotnet.invalidate_cache()
 					dotnet.post_change_with_solution()
 				end
 			end, { success_msg = "csnew: added reference " .. vim.fn.fnamemodify(choice, ":t") })
@@ -85,6 +87,7 @@ function M.remove(opts)
 		local reference = dotnet.normalize(opts.reference)
 		dotnet.run({ "remove", target, "reference", reference }, function(ok)
 			if ok then
+				dotnet.invalidate_cache()
 				dotnet.post_change_with_solution()
 			end
 		end, { success_msg = "csnew: removed reference " .. vim.fn.fnamemodify(reference, ":t") })
@@ -100,6 +103,7 @@ function M.remove(opts)
 		if choice then
 			dotnet.run({ "remove", target, "reference", choice }, function(ok)
 				if ok then
+					dotnet.invalidate_cache()
 					dotnet.post_change_with_solution()
 				end
 			end, { success_msg = "csnew: removed reference " .. vim.fn.fnamemodify(choice, ":t") })

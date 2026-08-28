@@ -63,7 +63,16 @@ local function excluded(path)
 		or p:match("/%.vs/")
 end
 
+local file_cache = {}
+local CACHE_TTL = 5000
+
 local function find_files(root, suffixes)
+	local key = root .. "|" .. table.concat(suffixes, ",")
+	local now = vim.uv.now()
+	local entry = file_cache[key]
+	if entry and (now - entry.at) < CACHE_TTL then
+		return entry.results
+	end
 	local found = vim.fs.find(function(name, path)
 		if excluded(path .. "/" .. name) then
 			return false
@@ -80,7 +89,12 @@ local function find_files(root, suffixes)
 		table.insert(results, normalize(f))
 	end
 	table.sort(results)
+	file_cache[key] = { at = now, results = results }
 	return results
+end
+
+function M.invalidate_cache()
+	file_cache = {}
 end
 
 function M.find_projects(root)
