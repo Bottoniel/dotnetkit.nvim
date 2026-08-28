@@ -3,6 +3,23 @@ local reference = require("csnew.reference")
 
 local M = {}
 
+local function trim(s)
+	return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function first_nonempty(text)
+	local lines = {}
+	for line in (text or ""):gmatch("[^\r\n]+") do
+		if line:match("%S") then
+			table.insert(lines, line)
+			if #lines >= 8 then
+				break
+			end
+		end
+	end
+	return table.concat(lines, "\n")
+end
+
 function M.parse_diagnostics(text)
 	local items = {}
 	for line in (text or ""):gmatch("[^\r\n]+") do
@@ -47,7 +64,7 @@ end
 function M.run(opts)
 	opts = opts or {}
 	resolve_target(opts.target, function(target)
-		dotnet.run({ "build", target, "--nologo", "-v", "q" }, function(_, stdout, stderr)
+		dotnet.run({ "build", target, "--nologo", "-v", "q" }, function(ok, stdout, stderr)
 			local items = M.parse_diagnostics((stdout or "") .. "\n" .. (stderr or ""))
 			vim.fn.setqflist({}, "r", { title = "dotnet build " .. vim.fn.fnamemodify(target, ":t"), items = items })
 			local errors = 0
@@ -59,12 +76,20 @@ function M.run(opts)
 					warnings = warnings + 1
 				end
 			end
-			if errors > 0 then
+			if not ok then
 				vim.cmd("copen")
-				vim.notify(
-					("csnew: build failed (%d error(s), %d warning(s))"):format(errors, warnings),
-					vim.log.levels.ERROR
-				)
+				local msg = ("csnew: build failed (%d error(s), %d warning(s))"):format(errors, warnings)
+				if #items == 0 then
+					local detail = stderr
+					if detail == nil or trim(detail) == "" then
+						detail = stdout
+					end
+					local extra = first_nonempty(detail)
+					if extra ~= "" then
+						msg = "csnew: build failed\n" .. extra
+					end
+				end
+				vim.notify(msg, vim.log.levels.ERROR)
 			else
 				vim.cmd("cclose")
 				vim.notify(("csnew: build succeeded (%d warning(s))"):format(warnings), vim.log.levels.INFO)
