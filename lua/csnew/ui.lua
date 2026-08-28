@@ -74,6 +74,9 @@ function M.open_scratch(name, lines)
 	if buf == -1 then
 		buf = vim.api.nvim_create_buf(true, false)
 		vim.api.nvim_buf_set_name(buf, name)
+		vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+		vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf })
+		vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
 	end
 	vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
