@@ -80,7 +80,7 @@ local function resolve_projects(cb)
 	})
 end
 
-local function ef_args(subcmd, projects, extra)
+local function ef_args(subcmd, proj, extra)
 	local args = { "ef" }
 	vim.list_extend(args, subcmd)
 	vim.list_extend(args, extra or {})
@@ -91,9 +91,9 @@ local function ef_args(subcmd, projects, extra)
 		table.insert(args, cfg.context)
 	end
 	table.insert(args, "--project")
-	table.insert(args, projects.project)
+	table.insert(args, proj.project)
 	table.insert(args, "--startup-project")
-	table.insert(args, projects.startup)
+	table.insert(args, proj.startup)
 	return args
 end
 
@@ -106,7 +106,7 @@ end
 function M.migrate(opts)
 	opts = opts or {}
 	ensure_ef(function()
-		resolve_projects(function(projects)
+		resolve_projects(function(proj)
 			local function run(name)
 				if not name:match("^[%a_][%w_]*$") then
 					vim.notify("csnew: invalid migration name", vim.log.levels.ERROR)
@@ -118,13 +118,13 @@ function M.migrate(opts)
 					table.insert(extra, "--output-dir")
 					table.insert(extra, cfg.output_dir)
 				end
-				dotnet.run(ef_args({ "migrations", "add", name }, projects, extra), function(ok)
+				dotnet.run(ef_args({ "migrations", "add", name }, proj, extra), function(ok)
 					if not ok then
 						return
 					end
-					local project_dir = vim.fn.isdirectory(projects.project) == 1
-							and projects.project
-						or vim.fn.fnamemodify(projects.project, ":h")
+					local project_dir = vim.fn.isdirectory(proj.project) == 1
+							and proj.project
+						or vim.fn.fnamemodify(proj.project, ":h")
 					local dir = project_dir .. "/" .. (cfg.output_dir or "Migrations")
 					local generated
 					for _, f in ipairs(vim.fn.glob(dir .. "/*_" .. name .. ".cs", false, true)) do
@@ -159,13 +159,13 @@ end
 function M.update(opts)
 	opts = opts or {}
 	ensure_ef(function()
-		resolve_projects(function(projects)
+		resolve_projects(function(proj)
 			local function run(target)
 				local extra = {}
 				if target and target ~= "" then
 					table.insert(extra, target)
 				end
-				dotnet.run(ef_args({ "database", "update" }, projects, extra), nil, {
+				dotnet.run(ef_args({ "database", "update" }, proj, extra), nil, {
 					progress_msg = "csnew: updating database",
 					success_msg = "csnew: database updated",
 				})
@@ -186,8 +186,8 @@ end
 
 function M.remove()
 	ensure_ef(function()
-		resolve_projects(function(projects)
-			dotnet.run(ef_args({ "migrations", "remove" }, projects), function(ok)
+		resolve_projects(function(proj)
+			dotnet.run(ef_args({ "migrations", "remove" }, proj), function(ok)
 				if not ok then
 					return
 				end
@@ -203,8 +203,8 @@ end
 
 function M.list()
 	ensure_ef(function()
-		resolve_projects(function(projects)
-			dotnet.run(ef_args({ "migrations", "list" }, projects), function(ok, stdout)
+		resolve_projects(function(proj)
+			dotnet.run(ef_args({ "migrations", "list" }, proj), function(ok, stdout)
 				if ok and stdout then
 					ui.open_scratch("ef://migrations", vim.split(stdout, "\n", { trimempty = true }))
 				end
@@ -218,7 +218,7 @@ end
 
 function M.script()
 	ensure_ef(function()
-		resolve_projects(function(projects)
+		resolve_projects(function(proj)
 			local cfg = ef_config()
 			local output = resolve_config_path(cfg.script_output, dotnet.workspace_root())
 				or (dotnet.workspace_root() .. "/Migrations.sql")
@@ -232,7 +232,7 @@ function M.script()
 			end
 			table.insert(subcmd, "-o")
 			table.insert(subcmd, output)
-			dotnet.run(ef_args(subcmd, projects), function(ok)
+			dotnet.run(ef_args(subcmd, proj), function(ok)
 				if ok then
 					vim.cmd.edit(vim.fn.fnameescape(output))
 				end

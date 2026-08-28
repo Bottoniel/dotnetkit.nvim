@@ -69,7 +69,12 @@ function M.create(opts)
 	end
 	vim.cmd.edit(vim.fn.fnameescape(path))
 	pcall(vim.api.nvim_win_set_cursor, 0, cursor)
-	vim.cmd("startinsert")
+	local line = vim.api.nvim_get_current_line()
+	if cursor[2] >= #line then
+		vim.cmd("startinsert!")
+	else
+		vim.cmd("startinsert")
+	end
 	pcall(function()
 		require("nvim-tree.api").tree.reload()
 	end)
