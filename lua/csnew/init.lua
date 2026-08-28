@@ -7,8 +7,31 @@ local config = {
 	ef = {},
 }
 
+local function is_list(t)
+	if vim.islist then
+		return vim.islist(t)
+	end
+	return vim.tbl_islist(t)
+end
+
+local function merge(base, override)
+	local out = vim.deepcopy(base)
+	for k, v in pairs(override or {}) do
+		if type(v) == "table" and type(out[k]) == "table" then
+			if is_list(v) then
+				out[k] = vim.deepcopy(v)
+			else
+				out[k] = merge(out[k], v)
+			end
+		else
+			out[k] = type(v) == "table" and vim.deepcopy(v) or v
+		end
+	end
+	return out
+end
+
 function M.setup(opts)
-	config = vim.tbl_deep_extend("force", config, opts or {})
+	config = merge(config, opts or {})
 	require("csnew.snippets").register()
 	pcall(function()
 		require("csnew.dap").setup()
@@ -17,10 +40,7 @@ end
 
 function M.get_config()
 	local repo = require("csnew.repoconfig").load()
-	if repo then
-		return vim.tbl_deep_extend("force", config, repo)
-	end
-	return config
+	return merge(config, repo or {})
 end
 
 function M.create(opts)
