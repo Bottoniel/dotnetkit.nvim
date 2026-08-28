@@ -15,16 +15,37 @@ local function netcoredbg_path()
 	return nil
 end
 
+function M.pick_newest_tfm(paths)
+	if not paths or #paths == 0 then
+		return nil
+	end
+	local scored = {}
+	for _, path in ipairs(paths) do
+		local tfm = path:match("/bin/Debug/([^/]+)/") or ""
+		local major, minor = tfm:match("net(%d+)%.(%d+)")
+		local score = major and (tonumber(major) * 10000 + tonumber(minor)) or -1
+		table.insert(scored, { path = path, score = score, tfm = tfm })
+	end
+	table.sort(scored, function(a, b)
+		if a.score ~= b.score then
+			return a.score < b.score
+		end
+		if a.tfm ~= b.tfm then
+			return a.tfm < b.tfm
+		end
+		return a.path < b.path
+	end)
+	return scored[#scored].path
+end
+
 local function find_dll(project)
 	local dir = vim.fn.isdirectory(project) == 1 and project or vim.fn.fnamemodify(project, ":h")
 	local name = vim.fn.fnamemodify(project, ":t:r")
 	local matches = vim.fn.glob(dir .. "/bin/Debug/*/" .. name .. ".dll", false, true)
 	if #matches > 0 then
-		table.sort(matches)
-		return matches[#matches]
+		return M.pick_newest_tfm(matches)
 	end
-	matches = vim.fn.glob(dir .. "/bin/Debug/*/*.dll", false, true)
-	return matches[1]
+	return M.pick_newest_tfm(vim.fn.glob(dir .. "/bin/Debug/*/*.dll", false, true))
 end
 
 function M.setup()
