@@ -21,9 +21,15 @@ function M.load()
 		return entry.config
 	end
 
+	local warned = entry and entry.warned
+	if not warned then
+		vim.notify("csnew: found .csnew.lua, Neovim will ask you to trust it", vim.log.levels.INFO)
+		warned = true
+	end
+
 	local contents = vim.secure.read(path)
 	if not contents then
-		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, denied = true }
+		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, denied = true, warned = warned }
 		return nil
 	end
 
@@ -32,7 +38,7 @@ function M.load()
 		if not entry or entry.notify ~= load_err then
 			vim.notify("csnew: invalid .csnew.lua\n" .. load_err, vim.log.levels.ERROR)
 		end
-		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, notify = load_err }
+		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, notify = load_err, warned = warned }
 		return nil
 	end
 
@@ -42,11 +48,11 @@ function M.load()
 		if not entry or entry.notify ~= err then
 			vim.notify("csnew: invalid .csnew.lua\n" .. tostring(err), vim.log.levels.ERROR)
 		end
-		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, notify = err }
+		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, notify = err, warned = warned }
 		return nil
 	end
 
-	cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, config = result }
+	cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, config = result, warned = warned }
 	return result
 end
 
