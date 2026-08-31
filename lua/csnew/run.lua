@@ -1,5 +1,5 @@
 local dotnet = require("csnew.dotnet")
-local projects = require("csnew.projects")
+local reference = require("csnew.reference")
 
 local M = {}
 
@@ -117,7 +117,11 @@ local function with_profile(kind, project)
 	end)
 end
 
-local function pick_runnable(prompt, cb)
+local function resolve_runnable(prompt, preset, go)
+	if preset and preset ~= "" then
+		go(dotnet.normalize(preset))
+		return
+	end
 	local root = dotnet.workspace_root()
 	local runnable = {}
 	for _, p in ipairs(dotnet.find_projects(root)) do
@@ -125,8 +129,20 @@ local function pick_runnable(prompt, cb)
 			table.insert(runnable, p)
 		end
 	end
+	local current = reference.current_project()
+	if current then
+		current = dotnet.normalize(current)
+	end
+	if current and vim.tbl_contains(runnable, current) then
+		go(current)
+		return
+	end
 	if #runnable == 0 then
 		vim.notify("csnew: no runnable project found (needs OutputType=Exe or a Web/Worker SDK)", vim.log.levels.WARN)
+		return
+	end
+	if #runnable == 1 then
+		go(runnable[1])
 		return
 	end
 	vim.ui.select(runnable, {
@@ -136,23 +152,8 @@ local function pick_runnable(prompt, cb)
 		end,
 	}, function(choice)
 		if choice then
-			cb(choice)
+			go(choice)
 		end
-	end)
-end
-
-local function resolve_runnable(prompt, preset, go)
-	projects.resolve_current_or_pick(prompt, preset, function(project)
-		if not project then
-			return
-		end
-		if not preset and not dotnet.is_runnable(project) then
-			pick_runnable(prompt, function(p)
-				go(p)
-			end)
-			return
-		end
-		go(project)
 	end)
 end
 
