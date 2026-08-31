@@ -1,5 +1,4 @@
 local dotnet = require("csnew.dotnet")
-local reference = require("csnew.reference")
 local projects = require("csnew.projects")
 local ui = require("csnew.ui")
 
