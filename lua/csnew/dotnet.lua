@@ -63,6 +63,7 @@ local function excluded(path)
 		or p:match("/%.vs/")
 end
 
+-- results are copied on return so callers cannot mutate the cache
 local file_cache = {}
 local CACHE_TTL = 5000
 
@@ -71,7 +72,7 @@ local function find_files(root, suffixes)
 	local now = vim.uv.now()
 	local entry = file_cache[key]
 	if entry and (now - entry.at) < CACHE_TTL then
-		return entry.results
+		return vim.deepcopy(entry.results)
 	end
 	local found = vim.fs.find(function(name, path)
 		if excluded(path .. "/" .. name) then
@@ -90,7 +91,7 @@ local function find_files(root, suffixes)
 	end
 	table.sort(results)
 	file_cache[key] = { at = now, results = results }
-	return results
+	return vim.deepcopy(results)
 end
 
 function M.invalidate_cache()
