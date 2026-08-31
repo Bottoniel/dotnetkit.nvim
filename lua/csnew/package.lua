@@ -134,6 +134,7 @@ function M.list(opts)
 				end
 				show()
 			end, {
+				progress_msg = "csnew: checking for newer versions",
 				success_msg = false,
 				fail_msg = false,
 			})
