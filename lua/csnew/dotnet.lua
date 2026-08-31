@@ -67,6 +67,9 @@ end
 local file_cache = {}
 local CACHE_TTL = 5000
 
+-- keyed by csproj path, invalidated by the file's own mtime
+local runnable_cache = {}
+
 local function find_files(root, suffixes)
 	local key = root .. "|" .. table.concat(suffixes, ",")
 	local now = vim.uv.now()
@@ -96,6 +99,7 @@ end
 
 function M.invalidate_cache()
 	file_cache = {}
+	runnable_cache = {}
 end
 
 function M.find_projects(root)
@@ -184,19 +188,33 @@ function M.csproj_references(csproj_path)
 end
 
 function M.is_runnable(csproj_path)
+	local stat = vim.uv.fs_stat(csproj_path)
+	if not stat then
+		runnable_cache[csproj_path] = nil
+		return false
+	end
+
+	local entry = runnable_cache[csproj_path]
+	if entry and entry.sec == stat.mtime.sec and entry.nsec == stat.mtime.nsec then
+		return entry.value
+	end
+
 	local ok, lines = pcall(vim.fn.readfile, csproj_path)
 	if not ok then
 		return false
 	end
 	local content = table.concat(lines, "\n")
+	local value = false
 	if content:match('<Project[^>]*Sdk=["\'][^"\']*Microsoft%.NET%.Sdk%.Web') then
-		return true
+		value = true
+	elseif content:match('<Project[^>]*Sdk=["\'][^"\']*Microsoft%.NET%.Sdk%.Worker') then
+		value = true
+	else
+		local out = content:match("<OutputType>%s*(.-)%s*</OutputType>")
+		value = out ~= nil and out:lower() == "exe"
 	end
-	if content:match('<Project[^>]*Sdk=["\'][^"\']*Microsoft%.NET%.Sdk%.Worker') then
-		return true
-	end
-	local out = content:match("<OutputType>%s*(.-)%s*</OutputType>")
-	return out ~= nil and out:lower() == "exe"
+	runnable_cache[csproj_path] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, value = value }
+	return value
 end
 
 function M.lsp_restart()
