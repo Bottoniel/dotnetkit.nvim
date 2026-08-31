@@ -40,14 +40,26 @@ function M.pick_newest_tfm(paths)
 		if a.tfm ~= b.tfm then
 			return a.tfm < b.tfm
 		end
-		return a.path < b.path
+		return a.path > b.path
 	end)
 	return scored[#scored].path
 end
 
+local function assembly_name(csproj)
+	local ok, lines = pcall(vim.fn.readfile, csproj)
+	if ok then
+		local name = table.concat(lines, "\n"):match("<AssemblyName>%s*(.-)%s*</AssemblyName>")
+		if name and name ~= "" then
+			return name
+		end
+	end
+	return vim.fn.fnamemodify(csproj, ":t:r")
+end
+
 local function find_dll(project)
 	local dir = vim.fn.isdirectory(project) == 1 and project or vim.fn.fnamemodify(project, ":h")
-	local name = vim.fn.fnamemodify(project, ":t:r")
+	local name = vim.fn.isdirectory(project) == 1 and vim.fn.fnamemodify(project, ":t:r")
+		or assembly_name(project)
 	local matches = vim.fn.glob(dir .. "/bin/Debug/*/" .. name .. ".dll", false, true)
 	if #matches > 0 then
 		return M.pick_newest_tfm(matches)
