@@ -7,6 +7,8 @@ local config = {
 	ef = {},
 }
 
+-- is_list({}) is true, so an empty subtable counts as a list and replaces the
+-- whole section instead of merging; that is what makes after_change = {} work.
 local function is_list(t)
 	if vim.islist then
 		return vim.islist(t)

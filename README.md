@@ -359,6 +359,8 @@ All `ef.*` keys are optional. With nothing set:
 - one `.csproj` in the repo → used as both `--project` and `--startup-project`
 - several → two pickers (migrations project, then startup). The choice is remembered for the session (`Use last: X -> Y`)
 
+Empty tables count as **lists**, and lists replace the default instead of merging. `after_change = {}` therefore disables every post-change step — and by the same rule an empty `dotnet = {}` clears that whole section rather than merging with the defaults.
+
 ### Per-repo: `.csnew.lua`
 
 Put this file at the **git root** (same folder as `.git` / the `.sln`). Same schema as `setup()`. It **overrides** the global setup (deep merge: defaults < `setup()` < `.csnew.lua`).
