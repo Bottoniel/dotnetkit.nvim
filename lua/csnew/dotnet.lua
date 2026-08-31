@@ -183,6 +183,22 @@ function M.csproj_references(csproj_path)
 	return refs
 end
 
+function M.is_runnable(csproj_path)
+	local ok, lines = pcall(vim.fn.readfile, csproj_path)
+	if not ok then
+		return false
+	end
+	local content = table.concat(lines, "\n")
+	if content:match('<Project[^>]*Sdk=["\'][^"\']*Microsoft%.NET%.Sdk%.Web') then
+		return true
+	end
+	if content:match('<Project[^>]*Sdk=["\'][^"\']*Microsoft%.NET%.Sdk%.Worker') then
+		return true
+	end
+	local out = content:match("<OutputType>%s*(.-)%s*</OutputType>")
+	return out ~= nil and out:lower() == "exe"
+end
+
 function M.lsp_restart()
 	if vim.fn.exists(":LspRestart") == 2 then
 		pcall(vim.cmd, "LspRestart")

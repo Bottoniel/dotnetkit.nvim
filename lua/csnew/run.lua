@@ -117,21 +117,56 @@ local function with_profile(kind, project)
 	end)
 end
 
+local function pick_runnable(prompt, cb)
+	local root = dotnet.workspace_root()
+	local runnable = {}
+	for _, p in ipairs(dotnet.find_projects(root)) do
+		if dotnet.is_runnable(p) then
+			table.insert(runnable, p)
+		end
+	end
+	if #runnable == 0 then
+		vim.notify("csnew: no runnable project found (needs OutputType=Exe or a Web/Worker SDK)", vim.log.levels.WARN)
+		return
+	end
+	vim.ui.select(runnable, {
+		prompt = prompt,
+		format_item = function(p)
+			return dotnet.relative_display(p, root)
+		end,
+	}, function(choice)
+		if choice then
+			cb(choice)
+		end
+	end)
+end
+
+local function resolve_runnable(prompt, preset, go)
+	projects.resolve_current_or_pick(prompt, preset, function(project)
+		if not project then
+			return
+		end
+		if not preset and not dotnet.is_runnable(project) then
+			pick_runnable(prompt, function(p)
+				go(p)
+			end)
+			return
+		end
+		go(project)
+	end)
+end
+
 function M.run(opts)
 	opts = opts or {}
-	projects.resolve_current_or_pick("Run project:", opts.project, function(project)
-		if project then
-			with_profile("run", project)
-		end
+	resolve_runnable("Run project:", opts.project, function(project)
+		with_profile("run", project)
 	end)
 end
 
 function M.watch(opts)
 	opts = opts or {}
-	projects.resolve_current_or_pick("Watch project:", opts.project, function(project)
-		if project then
-			with_profile("watch", project)
-		end
+	resolve_runnable("Watch project:", opts.project, function(project)
+		with_profile("watch", project)
 	end)
 end
 
