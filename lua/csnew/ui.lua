@@ -82,6 +82,17 @@ function M.open_scratch(name, lines)
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
 	vim.api.nvim_set_option_value("filetype", "text", { buf = buf })
+	local win
+	for _, w in ipairs(vim.api.nvim_list_wins()) do
+		if vim.api.nvim_win_get_buf(w) == buf then
+			win = w
+			break
+		end
+	end
+	if win then
+		vim.api.nvim_set_current_win(win)
+		return
+	end
 	vim.cmd("sbuffer " .. buf)
 end
 
