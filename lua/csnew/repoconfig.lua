@@ -23,7 +23,7 @@ function M.load()
 
 	local warned = entry and entry.warned
 	if not warned then
-		vim.notify("csnew: found .csnew.lua, Neovim will ask you to trust it", vim.log.levels.INFO)
+		vim.notify("csnew: found .csnew.lua, Neovim may ask you to trust it", vim.log.levels.INFO)
 		warned = true
 	end
 
