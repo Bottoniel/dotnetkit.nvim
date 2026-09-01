@@ -17,17 +17,17 @@ Requires **Neovim 0.10+**.
 
 ## Requirements
 
-| Tool | Required for |
-|---|---|
-| Neovim ≥ 0.10 | everything (`vim.system`) |
-| .NET SDK (`dotnet` on `PATH`) | everything except `:CsNew` / snippets |
-| [`dotnet-ef`](https://learn.microsoft.com/ef/core/cli/dotnet) (`dotnet tool install --global dotnet-ef`) | `:EfMigrate`, `:EfUpdate`, … |
-| `Microsoft.EntityFrameworkCore.Design` on the **startup** project | EF design-time (`DbContext` creation) |
-| [LuaSnip](https://github.com/L3MON4D3/LuaSnip) | snippets (`cls`, `iface`, …) |
-| [nvim-dap](https://github.com/mfussenegger/nvim-dap) + [netcoredbg](https://github.com/Samsung/netcoredbg) | `:CsDebugRun` |
-| [dressing.nvim](https://github.com/stevearc/dressing.nvim) or [telescope-ui-select](https://github.com/nvim-telescope/telescope-ui-select.nvim) | nicer pickers (`vim.ui.select`) |
-| [nvim-tree.lua](https://github.com/nvim-tree/nvim-tree.lua) | optional: create a type on the node under the cursor |
-| roslyn / OmniSharp LSP | post-change `:LspRestart` actually reloads C# |
+| Tool                                                                                                                                            | Required for                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Neovim ≥ 0.10                                                                                                                                   | everything (`vim.system`)                            |
+| .NET SDK (`dotnet` on `PATH`)                                                                                                                   | everything except `:CsNew` / snippets                |
+| [`dotnet-ef`](https://learn.microsoft.com/ef/core/cli/dotnet) (`dotnet tool install --global dotnet-ef`)                                        | `:EfMigrate`, `:EfUpdate`, …                         |
+| `Microsoft.EntityFrameworkCore.Design` on the **startup** project                                                                               | EF design-time (`DbContext` creation)                |
+| [LuaSnip](https://github.com/L3MON4D3/LuaSnip)                                                                                                  | snippets (`cls`, `iface`, …)                         |
+| [nvim-dap](https://github.com/mfussenegger/nvim-dap) + [netcoredbg](https://github.com/Samsung/netcoredbg)                                      | `:CsDebugRun`                                        |
+| [dressing.nvim](https://github.com/stevearc/dressing.nvim) or [telescope-ui-select](https://github.com/nvim-telescope/telescope-ui-select.nvim) | nicer pickers (`vim.ui.select`)                      |
+| [nvim-tree.lua](https://github.com/nvim-tree/nvim-tree.lua)                                                                                     | optional: create a type on the node under the cursor |
+| roslyn / OmniSharp LSP                                                                                                                          | post-change `:LspRestart` actually reloads C#        |
 
 ## Install (lazy.nvim)
 
@@ -116,13 +116,13 @@ Snippets + a keymap. Debug is a separate spec (see below).
 
 These are **not** part of this plugin. Copy them into **your** Neovim config (lazy spec files) if you want the same workflow: Telescope pickers, format on save, Mason tools, and debug UI.
 
-| What | Where (your config) | Add |
-|---|---|---|
-| Pickers in Telescope | spec of **telescope.nvim** | `telescope-ui-select` |
-| Format on save for `.cs` | spec of **conform.nvim** | `cs = { "csharpier" }` |
-| Install formatter + debugger | spec of **mason-tool-installer** | `csharpier`, `netcoredbg` |
-| Debug UI / keymaps | **new** spec, e.g. `lua/plugins/dap.lua` | nvim-dap + nvim-dap-ui |
-| `:CsNew` on the tree node | spec of **nvim-tree** | `on_attach` (see [nvim-tree](#optional-nvim-tree)) |
+| What                         | Where (your config)                      | Add                                                |
+| ---------------------------- | ---------------------------------------- | -------------------------------------------------- |
+| Pickers in Telescope         | spec of **telescope.nvim**               | `telescope-ui-select`                              |
+| Format on save for `.cs`     | spec of **conform.nvim**                 | `cs = { "csharpier" }`                             |
+| Install formatter + debugger | spec of **mason-tool-installer**         | `csharpier`, `netcoredbg`                          |
+| Debug UI / keymaps           | **new** spec, e.g. `lua/plugins/dap.lua` | nvim-dap + nvim-dap-ui                             |
+| `:CsNew` on the tree node    | spec of **nvim-tree**                    | `on_attach` (see [nvim-tree](#optional-nvim-tree)) |
 
 ### Telescope pickers
 
@@ -248,28 +248,28 @@ Needs `netcoredbg` (Mason, above). Then `:CsBuild` → breakpoint → `<leader>d
 
 ## Commands
 
-| Command | CLI / action |
-|---|---|
-| `:CsNew [kind] [name]` | Create a C# type in the current directory |
+| Command                                    | CLI / action                                                                        |
+| ------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `:CsNew [kind] [name]`                     | Create a C# type in the current directory                                           |
 | `:CsNewProject [template] [name] [outdir]` | `dotnet new` (console, classlib, webapi, web, xunit, nunit, mstest); offers sln add |
-| `:CsAddRef [target] [ref]` | `dotnet add reference` |
-| `:CsRemoveRef [target] [ref]` | `dotnet remove reference` |
-| `:CsSlnAdd [project]` | `dotnet sln add` |
-| `:CsSlnRemove [project]` | `dotnet sln remove` |
-| `:CsAddPkg [name] [version]` | `dotnet add package` |
-| `:CsListPkg [project]` | `dotnet list package --outdated` (scratch buffer) |
-| `:CsRemovePkg [name]` | `dotnet remove package` |
-| `:CsUpdatePkg [name] [version]` | update one outdated package (or named) |
-| `:CsBuild [target]` | `dotnet build` → quickfix (`:cnext`) |
-| `:CsRun [project]` | `dotnet run` + `launchSettings.json` profile picker |
-| `:CsWatch [project]` | `dotnet watch run` |
-| `:CsStop` | stop the Run/Watch job |
-| `:CsDebugRun [project]` | launch `bin/Debug/*/<project>.dll` with nvim-dap |
-| `:EfMigrate [name]` | `dotnet ef migrations add` |
-| `:EfUpdate [target]` | `dotnet ef database update` (empty = latest, `0` = revert all) |
-| `:EfRemove` | `dotnet ef migrations remove` |
-| `:EfList` | `dotnet ef migrations list` (scratch buffer) |
-| `:EfScript` | `dotnet ef migrations script --idempotent` → `Migrations.sql` |
+| `:CsAddRef [target] [ref]`                 | `dotnet add reference`                                                              |
+| `:CsRemoveRef [target] [ref]`              | `dotnet remove reference`                                                           |
+| `:CsSlnAdd [project]`                      | `dotnet sln add`                                                                    |
+| `:CsSlnRemove [project]`                   | `dotnet sln remove`                                                                 |
+| `:CsAddPkg [name] [version]`               | `dotnet add package`                                                                |
+| `:CsListPkg [project]`                     | `dotnet list package --outdated` (scratch buffer)                                   |
+| `:CsRemovePkg [name]`                      | `dotnet remove package`                                                             |
+| `:CsUpdatePkg [name] [version]`            | update one outdated package (or named)                                              |
+| `:CsBuild [target]`                        | `dotnet build` → quickfix (`:cnext`)                                                |
+| `:CsRun [project]`                         | `dotnet run` + `launchSettings.json` profile picker                                 |
+| `:CsWatch [project]`                       | `dotnet watch run`                                                                  |
+| `:CsStop`                                  | stop the Run/Watch job                                                              |
+| `:CsDebugRun [project]`                    | launch `bin/Debug/*/<project>.dll` with nvim-dap                                    |
+| `:EfMigrate [name]`                        | `dotnet ef migrations add`                                                          |
+| `:EfUpdate [target]`                       | `dotnet ef database update` (empty = latest, `0` = revert all)                      |
+| `:EfRemove`                                | `dotnet ef migrations remove`                                                       |
+| `:EfList`                                  | `dotnet ef migrations list` (scratch buffer)                                        |
+| `:EfScript`                                | `dotnet ef migrations script --idempotent` → `Migrations.sql`                       |
 
 Arguments are optional. Missing pieces are asked with `vim.ui.select` / `vim.ui.input`.
 
@@ -281,14 +281,14 @@ Requires **LuaSnip** and `setup()` (`opts = {}` is enough).
 
 In a `.cs` buffer, type the trigger and expand with your LuaSnip / nvim-cmp mapping:
 
-| Trigger | Type | Naming |
-|---|---|---|
-| `cls` | class | as typed |
-| `iface` | interface | `I` prefix if missing |
-| `rec` | record | as typed |
-| `enm` | enum | as typed |
-| `ctrl` | controller | `Controller` suffix if missing |
-| `exc` | exception | `Exception` suffix if missing |
+| Trigger | Type       | Naming                         |
+| ------- | ---------- | ------------------------------ |
+| `cls`   | class      | as typed                       |
+| `iface` | interface  | `I` prefix if missing          |
+| `rec`   | record     | as typed                       |
+| `enm`   | enum       | as typed                       |
+| `ctrl`  | controller | `Controller` suffix if missing |
+| `exc`   | exception  | `Exception` suffix if missing  |
 
 Namespace is `RootNamespace` (or the `.csproj` name) plus folders relative to the project.
 
@@ -403,16 +403,16 @@ If the file is missing, pickers still work. If it is broken, the plugin notifies
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| `Unable to create a 'DbContext'… DbContextOptions` | Layered app: set `ef.startup_project` (or `.csnew.lua`) to the project that has `Program.cs` + `AddDbContext`. The Infrastructure project is not a host. |
-| `Generating idempotent scripts… not supported for SQLite` | `ef.script_idempotent = false` |
-| `dotnet-ef not available` | `dotnet tool install --global dotnet-ef` |
-| `netcoredbg not found` | `:MasonInstall netcoredbg` (or put `netcoredbg` on `PATH`) |
-| `no Debug dll found` | `:CsBuild` first |
-| Connection error to `localhost:5432` / SQL Server | Not the plugin — Postgres/SQL is down or the connection string is wrong |
-| Snippets do nothing | LuaSnip in `dependencies`, and `opts = {}` so `setup()` runs |
-| Pickers look ugly | dressing.nvim or telescope-ui-select |
+| Symptom                                                   | Fix                                                                                                                                                      |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Unable to create a 'DbContext'… DbContextOptions`        | Layered app: set `ef.startup_project` (or `.csnew.lua`) to the project that has `Program.cs` + `AddDbContext`. The Infrastructure project is not a host. |
+| `Generating idempotent scripts… not supported for SQLite` | `ef.script_idempotent = false`                                                                                                                           |
+| `dotnet-ef not available`                                 | `dotnet tool install --global dotnet-ef`                                                                                                                 |
+| `netcoredbg not found`                                    | `:MasonInstall netcoredbg` (or put `netcoredbg` on `PATH`)                                                                                               |
+| `no Debug dll found`                                      | `:CsBuild` first                                                                                                                                         |
+| Connection error to `localhost:5432` / SQL Server         | Not the plugin — Postgres/SQL is down or the connection string is wrong                                                                                  |
+| Snippets do nothing                                       | LuaSnip in `dependencies`, and `opts = {}` so `setup()` runs                                                                                             |
+| Pickers look ugly                                         | dressing.nvim or telescope-ui-select                                                                                                                     |
 
 ## License
 
