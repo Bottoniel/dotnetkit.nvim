@@ -225,7 +225,7 @@ dotnetkit does **not** install nvim-dap, but it does carry **all the wiring**: t
 }
 ```
 
-Don't want your own keys? Set `dap = { keymaps = "<leader>d" }` in the dotnetkit opts and the standard set (`b B d l c o i O t u r R`) is registered for you. Opening a `.cs` never loads nvim-dap; registration happens when the plugin actually loads (lazy.nvim `LazyLoad`) or on the first debug command.
+Don't want your own keys? Set `dap = { keymaps = "<leader>d" }` in the dotnetkit opts and the standard set (`b B d l c o i O t u e r R`) is registered for you — `e` evaluates the word under the cursor, or the selection in visual mode. Opening a `.cs` never loads nvim-dap; registration happens when the plugin actually loads (lazy.nvim `LazyLoad`) or on the first debug command.
 
 What you get:
 
@@ -233,7 +233,8 @@ What you get:
 - `dap.continue()` — offers `dotnetkit: launch <Project>` and `dotnetkit: attach`.
 - `:CsDebugAttach` — attach to a live .NET process (e.g. the one `:CsRun` / `:CsWatch` left running), filtered to `dotnet` / the project's assembly name.
 - `:CsDebugStop` — terminate the session.
-- **dap-ui**: when `nvim-dap-ui` is installed and you have **not** wired it yourself (no `dapui_config` listeners, no `dapui.setup()`), dotnetkit calls `setup()` and opens/closes the UI around sessions. If you already wired it — like the classic `dapui_config` snippet — dotnetkit detects that and stays out of the way. `dap = { ui = false }` disables all of it.
+- **Port pre-flight**: before launching, the port from the profile's `applicationUrl` is checked. If something is already listening — typically your own app, left over from a session whose debugger died — you get a prompt offering to attach to it, kill it and launch, or launch anyway, instead of Kestrel throwing an unhandled `AddressInUseException` mid-session. `dap.port_check = false` turns it off.
+- **dap-ui**: when `nvim-dap-ui` is installed and you have **not** wired it yourself (no `dapui_config` listeners, no `dapui.setup()`), dotnetkit calls `setup()` and opens/closes the UI around sessions. The layout it applies drops the `console` element — with netcoredbg it never fills (see below) — and gives `scopes` the room the breakpoint list does not need. If you already wired dap-ui yourself — like the classic `dapui_config` snippet — dotnetkit detects that and stays out of the way, layout included, so configuring `dapui.setup({ layouts = ... })` on your side is how you override it. `dap = { ui = false }` disables all of it.
 
 Where the app output goes: netcoredbg does not implement `runInTerminal`, so stdout arrives in the dap-ui **REPL** (`:DapToggleRepl`), not in the "console" element. That is expected, not a bug.
 
@@ -246,6 +247,7 @@ Run `:checkhealth csnew` to see the whole stack at a glance: dotnet, dotnet-ef, 
 | `dap.ui`         | `"auto"`   | `"auto"`/`true`: manage dap-ui if the user didn't; `false`: never touch |
 | `dap.build`      | `true`     | `dotnet build <csproj>` before launching                                |
 | `dap.profile`    | `true`     | apply `launchSettings.json` env + args                                   |
+| `dap.port_check` | `true`     | check the profile's port before launching (see below)                    |
 | `dap.configuration` | `"Debug"` | looks under `bin/<configuration>/` (RID subfolders included)            |
 | `dap.keymaps`    | `false`    | or a prefix like `"<leader>d"` to register the standard set              |
 | `dap.netcoredbg` | `nil`      | explicit path; default resolves Mason, then `PATH`                       |

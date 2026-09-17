@@ -191,6 +191,199 @@ function M.with_launch_profile(project, cfg, cb)
 	end)
 end
 
+-- The port a URL binds. "localhost" and wildcard hosts are probed on loopback,
+-- which is where a dev server actually listens.
+local function probe_host(host)
+	if host == "localhost" or host == "+" or host == "*" or host == "0.0.0.0" or host == "::" or host == "[::]" then
+		return "127.0.0.1"
+	end
+	return (host:gsub("^%[", ""):gsub("%]$", ""))
+end
+
+-- Endpoints the launch profile will bind, taken from ASPNETCORE_URLS.
+-- Kept public: pure parsing, worth exercising on its own.
+function M.profile_endpoints(env)
+	local urls = env and env.ASPNETCORE_URLS
+	if type(urls) ~= "string" or urls == "" then
+		return {}
+	end
+	local out, seen = {}, {}
+	for url in urls:gmatch("[^;,]+") do
+		url = vim.trim(url)
+		local host, port = url:match("^%a[%w+.%-]*://(%[[^%]]+%]):(%d+)")
+		if not host then
+			host, port = url:match("^%a[%w+.%-]*://([^:/]+):(%d+)")
+		end
+		port = tonumber(port)
+		if host and port and not seen[port] then
+			seen[port] = true
+			table.insert(out, { url = url, host = probe_host(host), port = port })
+		end
+	end
+	return out
+end
+
+-- Is someone listening there? A connect answers that directly; binding does
+-- not, because libuv sets SO_REUSEADDR and the bind succeeds anyway.
+-- Kept public: used by the pre-flight and easy to verify in isolation.
+function M.port_listening(host, port, timeout)
+	local client = vim.uv.new_tcp()
+	if not client then
+		return false
+	end
+	local done, listening = false, false
+	local ok = pcall(client.connect, client, host, port, function(err)
+		listening = err == nil
+		done = true
+		pcall(function()
+			client:close()
+		end)
+	end)
+	if not ok then
+		pcall(function()
+			client:close()
+		end)
+		return false
+	end
+	vim.wait(timeout or 200, function()
+		return done
+	end, 10)
+	if not done then
+		pcall(function()
+			client:close()
+		end)
+	end
+	return listening
+end
+
+-- Best effort: who holds the port. Returns pid, name or nil.
+local function port_owner(port)
+	local function first_pid(out)
+		return tonumber((out or ""):match("%d+"))
+	end
+	local function capture(cmd)
+		if vim.fn.executable(cmd[1]) ~= 1 then
+			return nil
+		end
+		local res = vim.system(cmd, { text = true }):wait(2000)
+		return res.code == 0 and res.stdout or nil
+	end
+
+	local pid
+	if vim.fn.has("win32") == 1 then
+		local out = capture({ "netstat", "-ano", "-p", "tcp" })
+		for line in (out or ""):gmatch("[^\r\n]+") do
+			if line:match(":" .. port .. "%s") and line:match("LISTENING") then
+				pid = tonumber(line:match("(%d+)%s*$"))
+				break
+			end
+		end
+	else
+		pid = first_pid(capture({ "lsof", "-ti", "tcp:" .. port, "-sTCP:LISTEN" }))
+		if not pid then
+			local out = capture({ "ss", "-ltnp" })
+			for line in (out or ""):gmatch("[^\r\n]+") do
+				if line:match(":" .. port .. "%s") then
+					pid = tonumber(line:match("pid=(%d+)"))
+					break
+				end
+			end
+		end
+	end
+	if not pid then
+		return nil
+	end
+
+	local name
+	local cmdline = "/proc/" .. pid .. "/cmdline"
+	if vim.fn.filereadable(cmdline) == 1 then
+		local ok, lines = pcall(vim.fn.readfile, cmdline, "b")
+		if ok and lines and lines[1] then
+			name = lines[1]:gsub("%z", " "):match("([^/ ]+%.dll)") or lines[1]:gsub("%z.*", "")
+		end
+	end
+	if not name then
+		name = capture({ "ps", "-p", tostring(pid), "-o", "comm=" })
+		name = name and vim.trim(name) or nil
+	end
+	return pid, name
+end
+
+-- Terminate the process holding the port, escalating to SIGKILL, and report
+-- whether the port actually came free.
+local function free_port(pid, host, port)
+	local function signal(sig)
+		if vim.fn.has("win32") == 1 then
+			vim.system({ "taskkill", "/PID", tostring(pid), "/F" }):wait(3000)
+		else
+			vim.system({ "kill", sig, tostring(pid) }):wait(2000)
+		end
+	end
+	local function gone(ms)
+		local deadline = vim.uv.now() + ms
+		while vim.uv.now() < deadline do
+			if not M.port_listening(host, port, 100) then
+				return true
+			end
+			vim.wait(150)
+		end
+		return not M.port_listening(host, port, 100)
+	end
+	signal("-TERM")
+	if gone(3000) then
+		return true
+	end
+	vim.notify("csnew: pid " .. pid .. " ignored SIGTERM, forcing", vim.log.levels.WARN)
+	signal("-KILL")
+	return gone(2000)
+end
+
+-- Kestrel reports a taken port as an unhandled AddressInUseException in the
+-- middle of a debug session, which reads like a crash. Check first and offer
+-- the two things you actually want: attach to what is already there, or
+-- replace it. Disable with dap.port_check = false.
+local function check_ports(env, cfg, cb)
+	if cfg.port_check == false then
+		cb(true)
+		return
+	end
+	local busy
+	for _, ep in ipairs(M.profile_endpoints(env)) do
+		if M.port_listening(ep.host, ep.port) then
+			busy = ep
+			break
+		end
+	end
+	if not busy then
+		cb(true)
+		return
+	end
+
+	local pid, name = port_owner(busy.port)
+	local who = pid and (" (pid " .. pid .. (name and (", " .. name) or "") .. ")") or ""
+	local choices = { "Attach to it instead" }
+	if pid then
+		table.insert(choices, "Kill it and launch")
+	end
+	vim.list_extend(choices, { "Launch anyway", "Cancel" })
+
+	vim.ui.select(choices, {
+		prompt = busy.url .. " is already in use" .. who .. ":",
+	}, function(choice)
+		if choice == "Attach to it instead" then
+			M.debug_attach()
+		elseif choice == "Kill it and launch" then
+			if free_port(pid, busy.host, busy.port) then
+				cb(true)
+			else
+				vim.notify("csnew: port " .. busy.port .. " is still in use", vim.log.levels.ERROR)
+			end
+		elseif choice == "Launch anyway" then
+			cb(true)
+		end
+	end)
+end
+
 local function launch_dap_config(project, dll, env, args, cfg)
 	local config = {
 		type = "coreclr",
@@ -340,13 +533,39 @@ end
 
 -- dap-ui is only required here, when a real session starts, so registering the
 -- listeners never loads dap-ui + nio on .cs startup.
+-- Layout used only when dotnetkit is the one calling dapui.setup(). It drops
+-- the "console" element, which stays empty with netcoredbg (it has no
+-- runInTerminal support, so program output goes to the repl), and gives scopes
+-- the room the breakpoint list does not need.
+local default_ui_layout = {
+	{
+		elements = {
+			{ id = "scopes", size = 0.35 },
+			{ id = "stacks", size = 0.25 },
+			{ id = "watches", size = 0.25 },
+			{ id = "breakpoints", size = 0.15 },
+		},
+		size = 40,
+		position = "left",
+	},
+	{
+		elements = { "repl" },
+		size = 10,
+		position = "bottom",
+	},
+}
+
 local function open_ui()
 	local ok, dapui = pcall(require, "dapui")
 	if not ok then
 		return
 	end
 	if not dapui_configured() then
-		pcall(dapui.setup)
+		-- Fall back to dap-ui's own defaults if the layout is ever rejected, so a
+		-- schema change there cannot leave the UI unconfigured and silent.
+		if not pcall(dapui.setup, { layouts = vim.deepcopy(default_ui_layout) }) then
+			pcall(dapui.setup)
+		end
 	end
 	dapui.open()
 end
@@ -375,8 +594,8 @@ local function wire_keymaps(cfg)
 	if not prefix or prefix == false then
 		return
 	end
-	local function map(suffix, fn, desc)
-		vim.keymap.set("n", prefix .. suffix, fn, { silent = true, desc = desc })
+	local function map(suffix, fn, desc, mode)
+		vim.keymap.set(mode or "n", prefix .. suffix, fn, { silent = true, desc = desc })
 	end
 	map("b", function()
 		require("dap").toggle_breakpoint()
@@ -406,6 +625,13 @@ local function wire_keymaps(cfg)
 	map("t", function()
 		require("dap").terminate()
 	end, "Debug: terminate")
+	-- normal mode evaluates the word under the cursor, visual the selection
+	map("e", function()
+		local ok, dapui = pcall(require, "dapui")
+		if ok then
+			dapui.eval()
+		end
+	end, "Debug: evaluate expression", { "n", "v" })
 	map("u", function()
 		local ok, dapui = pcall(require, "dapui")
 		if ok then
@@ -512,7 +738,9 @@ function M.debug_run(opts)
 			)
 			return
 		end
-		dap.run(launch_dap_config(project, dll, env, args, cfg))
+		check_ports(env, cfg, function()
+			dap.run(launch_dap_config(project, dll, env, args, cfg))
+		end)
 	end
 
 	local function launch(project)

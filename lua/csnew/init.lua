@@ -9,6 +9,7 @@ local config = {
 		ui = "auto", -- "auto" | true | false: manage nvim-dap-ui without clobbering user wiring
 		build = true, -- build the project before launching
 		profile = true, -- apply launchSettings.json (env + args)
+		port_check = true, -- warn before launching if the profile port is taken
 		configuration = "Debug", -- bin/<configuration>/...
 		keymaps = false, -- or a prefix like "<leader>d" to register the standard set
 		stop_at_entry = false,
