@@ -5,6 +5,15 @@ local config = {
 		after_change = { "clean", "restore", "lsp_restart" },
 	},
 	ef = {},
+	dap = {
+		ui = "auto", -- "auto" | true | false: manage nvim-dap-ui without clobbering user wiring
+		build = true, -- build the project before launching
+		profile = true, -- apply launchSettings.json (env + args)
+		configuration = "Debug", -- bin/<configuration>/...
+		keymaps = false, -- or a prefix like "<leader>d" to register the standard set
+		stop_at_entry = false,
+		just_my_code = true,
+	},
 }
 
 -- is_list({}) is true, so an empty subtable counts as a list and replaces the
@@ -36,7 +45,7 @@ function M.setup(opts)
 	config = merge(config, opts or {})
 	require("csnew.snippets").register()
 	pcall(function()
-		require("csnew.dap").setup()
+		require("csnew.dap").setup(config.dap)
 	end)
 end
 

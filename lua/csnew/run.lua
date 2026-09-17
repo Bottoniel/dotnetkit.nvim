@@ -6,7 +6,10 @@ local M = {}
 local job_id
 local term_buf = -1
 
-function M.parse_launch_profiles(path)
+-- Full launchSettings.json profiles: { { name, env, args }, ... } sorted by name.
+-- env comes from environmentVariables (+ applicationUrl as ASPNETCORE_URLS);
+-- args comes from commandLineArgs split on whitespace. Only "Project" profiles.
+function M.launch_profiles(path)
 	local ok, lines = pcall(vim.fn.readfile, path)
 	if not ok then
 		return {}
@@ -16,13 +19,46 @@ function M.parse_launch_profiles(path)
 	if not ok or type(decoded) ~= "table" or type(decoded.profiles) ~= "table" then
 		return {}
 	end
-	local names = {}
+	local out = {}
 	for name, profile in pairs(decoded.profiles) do
 		if type(profile) == "table" and (not profile.commandName or profile.commandName == "Project") then
-			table.insert(names, name)
+			local env = {}
+			if type(profile.environmentVariables) == "table" then
+				for k, v in pairs(profile.environmentVariables) do
+					env[k] = tostring(v)
+				end
+			end
+			-- applicationUrl maps to ASPNETCORE_URLS unless the profile sets it explicitly
+			if
+				type(profile.applicationUrl) == "string"
+				and profile.applicationUrl ~= ""
+				and env.ASPNETCORE_URLS == nil
+			then
+				env.ASPNETCORE_URLS = profile.applicationUrl
+			end
+			local args
+			local cmd_args = profile.commandLineArgs
+			if type(cmd_args) == "string" and cmd_args ~= "" then
+				args = {}
+				for a in cmd_args:gmatch("%S+") do
+					table.insert(args, a)
+				end
+			end
+			table.insert(out, { name = name, env = env, args = args })
 		end
 	end
-	table.sort(names)
+	table.sort(out, function(a, b)
+		return a.name < b.name
+	end)
+	return out
+end
+
+-- Names only; derived from launch_profiles so both stay in sync.
+function M.parse_launch_profiles(path)
+	local names = {}
+	for _, profile in ipairs(M.launch_profiles(path)) do
+		table.insert(names, profile.name)
+	end
 	return names
 end
 
@@ -36,6 +72,8 @@ end
 local function launch_settings_path(startup)
 	return project_dir(startup) .. "/Properties/launchSettings.json"
 end
+
+M.launch_settings_path = launch_settings_path
 
 function M.compose_args(kind, project, profile)
 	if kind == "watch" then
@@ -156,6 +194,8 @@ local function resolve_runnable(prompt, preset, go)
 		end
 	end)
 end
+
+M.resolve_runnable = resolve_runnable
 
 function M.run(opts)
 	opts = opts or {}

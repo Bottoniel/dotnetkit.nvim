@@ -100,6 +100,9 @@ function M.run(opts)
 				vim.cmd("cclose")
 				vim.notify(("csnew: build succeeded (%d warning(s))"):format(warnings), vim.log.levels.INFO)
 			end
+			if opts.on_done then
+				opts.on_done(ok, items)
+			end
 		end, {
 			progress_msg = "csnew: building " .. vim.fn.fnamemodify(target, ":t"),
 			success_msg = false,

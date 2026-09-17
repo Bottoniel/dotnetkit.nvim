@@ -12,7 +12,7 @@ Requires **Neovim 0.10+**.
 - NuGet: add, list (with outdated), remove, update
 - Entity Framework: migrate, update, remove, list, SQL script
 - Build into the quickfix list; run / watch / stop
-- Debug launch via nvim-dap + netcoredbg
+- Debug: build + launchSettings-aware launch, attach to a live process, dap-ui auto-managed (nvim-dap + netcoredbg)
 - Per-repo config (`.csnew.lua`) so layered apps do not need a global setup
 
 ## Requirements
@@ -24,7 +24,8 @@ Requires **Neovim 0.10+**.
 | [`dotnet-ef`](https://learn.microsoft.com/ef/core/cli/dotnet) (`dotnet tool install --global dotnet-ef`)                                        | `:EfMigrate`, `:EfUpdate`, …                         |
 | `Microsoft.EntityFrameworkCore.Design` on the **startup** project                                                                               | EF design-time (`DbContext` creation)                |
 | [LuaSnip](https://github.com/L3MON4D3/LuaSnip)                                                                                                  | snippets (`cls`, `iface`, …)                         |
-| [nvim-dap](https://github.com/mfussenegger/nvim-dap) + [netcoredbg](https://github.com/Samsung/netcoredbg)                                      | `:CsDebugRun`                                        |
+| [nvim-dap](https://github.com/mfussenegger/nvim-dap) + [netcoredbg](https://github.com/Samsung/netcoredbg)                                      | `:CsDebugRun`, `:CsDebugAttach`                     |
+| [nvim-dap-ui](https://github.com/rcarriga/nvim-dap-ui) + [nvim-nio](https://github.com/nvim-neotest/nvim-nio)                                   | optional: debug UI (dotnetkit wires it when present) |
 | [dressing.nvim](https://github.com/stevearc/dressing.nvim) or [telescope-ui-select](https://github.com/nvim-telescope/telescope-ui-select.nvim) | nicer pickers (`vim.ui.select`)                      |
 | [nvim-tree.lua](https://github.com/nvim-tree/nvim-tree.lua)                                                                                     | optional: create a type on the node under the cursor |
 | roslyn / OmniSharp LSP                                                                                                                          | post-change `:LspRestart` actually reloads C#        |
@@ -93,6 +94,8 @@ Snippets + a keymap. Debug is a separate spec (see below).
 		"CsUpdatePkg",
 		"CsNewProject",
 		"CsDebugRun",
+		"CsDebugAttach",
+		"CsDebugStop",
 		"EfMigrate",
 		"EfUpdate",
 		"EfRemove",
@@ -114,15 +117,15 @@ Snippets + a keymap. Debug is a separate spec (see below).
 
 ## Recommended companion setup
 
-These are **not** part of this plugin. Copy them into **your** Neovim config (lazy spec files) if you want the same workflow: Telescope pickers, format on save, Mason tools, and debug UI.
+These are **not** part of this plugin. Copy them into **your** Neovim config (lazy spec files) if you want the same workflow: Telescope pickers, format on save, Mason tools, and the debug plugins themselves (their wiring lives in dotnetkit).
 
-| What                         | Where (your config)                      | Add                                                |
-| ---------------------------- | ---------------------------------------- | -------------------------------------------------- |
-| Pickers in Telescope         | spec of **telescope.nvim**               | `telescope-ui-select`                              |
-| Format on save for `.cs`     | spec of **conform.nvim**                 | `cs = { "csharpier" }`                             |
-| Install formatter + debugger | spec of **mason-tool-installer**         | `csharpier`, `netcoredbg`                          |
-| Debug UI / keymaps           | **new** spec, e.g. `lua/plugins/dap.lua` | nvim-dap + nvim-dap-ui                             |
-| `:CsNew` on the tree node    | spec of **nvim-tree**                    | `on_attach` (see [nvim-tree](#optional-nvim-tree)) |
+| What                         | Where (your config)                      | Add                                                                           |
+| ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| Pickers in Telescope         | spec of **telescope.nvim**               | `telescope-ui-select`                                                         |
+| Format on save for `.cs`     | spec of **conform.nvim**                 | `cs = { "csharpier" }`                                                        |
+| Install formatter + debugger | spec of **mason-tool-installer**         | `csharpier`, `netcoredbg`                                                     |
+| Debug plugins                | spec of **nvim-dap**                     | dependencies + a couple of keys (see [Debug](#debug-nvim-dap)) — the wiring itself lives in dotnetkit |
+| `:CsNew` on the tree node    | spec of **nvim-tree**                    | `on_attach` (see [nvim-tree](#optional-nvim-tree))                            |
 
 ### Telescope pickers
 
@@ -205,7 +208,7 @@ Or install once by hand: `:MasonInstall csharpier` and `:MasonInstall netcoredbg
 
 ### Debug (nvim-dap)
 
-dotnetkit does **not** install nvim-dap. Add a **new** lazy spec (e.g. `lua/plugins/dap.lua`):
+dotnetkit does **not** install nvim-dap, but it does carry **all the wiring**: the netcoredbg adapter, launch/attach configurations (registered as a `dap.providers.configs` provider, so `dap.continue()` offers them), `launchSettings.json` env/args, a build before launching, and dap-ui. Your spec only needs the plugins and the keys you want (~8 lines instead of ~40):
 
 ```lua
 {
@@ -216,35 +219,38 @@ dotnetkit does **not** install nvim-dap. Add a **new** lazy spec (e.g. `lua/plug
 	},
 	keys = {
 		{ "<leader>db", function() require("dap").toggle_breakpoint() end, desc = "Debug: toggle breakpoint" },
-		{ "<leader>dB", function() require("dap").set_breakpoint(vim.fn.input("Breakpoint condition: ")) end, desc = "Debug: conditional breakpoint" },
-		{ "<leader>dd", function() require("dap").clear_breakpoints() end, desc = "Debug: clear all breakpoints" },
-		{ "<leader>dl", function() require("dap").list_breakpoints() vim.cmd("copen") end, desc = "Debug: list breakpoints" },
 		{ "<leader>dc", function() require("dap").continue() end, desc = "Debug: continue" },
-		{ "<leader>do", function() require("dap").step_over() end, desc = "Debug: step over" },
-		{ "<leader>di", function() require("dap").step_into() end, desc = "Debug: step into" },
-		{ "<leader>dO", function() require("dap").step_out() end, desc = "Debug: step out" },
-		{ "<leader>dt", function() require("dap").terminate() end, desc = "Debug: terminate" },
-		{ "<leader>du", function() require("dapui").toggle() end, desc = "Debug: toggle UI" },
-		{ "<leader>dr", function() require("csnew.dap").debug_run() end, desc = "Debug: run current project" },
+		{ "<leader>dr", function() require("csnew.dap").debug_run() end, desc = "Debug: run project" },
 	},
-	config = function()
-		local dap, dapui = require("dap"), require("dapui")
-		dapui.setup()
-		dap.listeners.after.event_initialized["dapui_config"] = function()
-			dapui.open()
-		end
-		dap.listeners.before.event_terminated["dapui_config"] = function()
-			dapui.close()
-		end
-		dap.listeners.before.event_exited["dapui_config"] = function()
-			dapui.close()
-		end
-		require("csnew.dap").setup()
-	end,
 }
 ```
 
-Needs `netcoredbg` (Mason, above). Then `:CsBuild` → breakpoint → `<leader>dr`.
+Don't want your own keys? Set `dap = { keymaps = "<leader>d" }` in the dotnetkit opts and the standard set (`b B d l c o i O t u r R`) is registered for you. Opening a `.cs` never loads nvim-dap; registration happens when the plugin actually loads (lazy.nvim `LazyLoad`) or on the first debug command.
+
+What you get:
+
+- `:CsDebugRun` — builds the project first (errors go to the quickfix and the session is **not** started), applies `launchSettings.json` (picker when there are several profiles, same UX as `:CsRun`), then launches netcoredbg with the project's `cwd`, the profile's env (`ASPNETCORE_ENVIRONMENT`, `ASPNETCORE_URLS`, …) and args. Because it rebuilds, breakpoints always match the sources — no more silently debugging a stale dll. From a library file it offers the runnable projects instead of trying to launch the library.
+- `dap.continue()` — offers `dotnetkit: launch <Project>` and `dotnetkit: attach`.
+- `:CsDebugAttach` — attach to a live .NET process (e.g. the one `:CsRun` / `:CsWatch` left running), filtered to `dotnet` / the project's assembly name.
+- `:CsDebugStop` — terminate the session.
+- **dap-ui**: when `nvim-dap-ui` is installed and you have **not** wired it yourself (no `dapui_config` listeners, no `dapui.setup()`), dotnetkit calls `setup()` and opens/closes the UI around sessions. If you already wired it — like the classic `dapui_config` snippet — dotnetkit detects that and stays out of the way. `dap = { ui = false }` disables all of it.
+
+Where the app output goes: netcoredbg does not implement `runInTerminal`, so stdout arrives in the dap-ui **REPL** (`:DapToggleRepl`), not in the "console" element. That is expected, not a bug.
+
+Run `:checkhealth csnew` to see the whole stack at a glance: dotnet, dotnet-ef, nvim-dap / dap-ui / nio (installed, loaded, configured), netcoredbg path + version, `ptrace_scope` (affects attach on Linux), and whether a `.csnew.lua` exists.
+
+#### Debug options
+
+| Option           | Default    | Meaning                                                                  |
+| ---------------- | ---------- | ------------------------------------------------------------------------ |
+| `dap.ui`         | `"auto"`   | `"auto"`/`true`: manage dap-ui if the user didn't; `false`: never touch |
+| `dap.build`      | `true`     | `dotnet build <csproj>` before launching                                |
+| `dap.profile`    | `true`     | apply `launchSettings.json` env + args                                   |
+| `dap.configuration` | `"Debug"` | looks under `bin/<configuration>/` (RID subfolders included)            |
+| `dap.keymaps`    | `false`    | or a prefix like `"<leader>d"` to register the standard set              |
+| `dap.netcoredbg` | `nil`      | explicit path; default resolves Mason, then `PATH`                       |
+| `dap.stop_at_entry` | `false`  | passed to netcoredbg (`stopAtEntry`)                                     |
+| `dap.just_my_code`  | `true`   | passed to netcoredbg (`justMyCode`)                                      |
 
 ## Commands
 
@@ -264,7 +270,9 @@ Needs `netcoredbg` (Mason, above). Then `:CsBuild` → breakpoint → `<leader>d
 | `:CsRun [project]`                         | `dotnet run` + `launchSettings.json` profile picker                                 |
 | `:CsWatch [project]`                       | `dotnet watch run`                                                                  |
 | `:CsStop`                                  | stop the Run/Watch job                                                              |
-| `:CsDebugRun [project]`                    | launch `bin/Debug/*/<project>.dll` with nvim-dap                                    |
+| `:CsDebugRun [project]`                    | build, then debug the project with nvim-dap (cwd + launchSettings env/args)          |
+| `:CsDebugAttach [project]`                 | attach nvim-dap to a running .NET process (e.g. the one `:CsRun` left)               |
+| `:CsDebugStop`                             | stop the active nvim-dap session                                                     |
 | `:EfMigrate [name]`                        | `dotnet ef migrations add`                                                          |
 | `:EfUpdate [target]`                       | `dotnet ef database update` (empty = latest, `0` = revert all)                      |
 | `:EfRemove`                                | `dotnet ef migrations remove`                                                       |
@@ -348,6 +356,17 @@ That enables snippets and default `after_change`. To override defaults, put the 
 			-- optional globals; better set per repo in .csnew.lua (below)
 			script_idempotent = true, -- false for SQLite
 		},
+		dap = {
+			-- defaults shown; debug details in the Debug section above
+			ui = "auto",
+			build = true,
+			profile = true,
+			configuration = "Debug",
+			keymaps = false,
+			-- netcoredbg = "/path/to/netcoredbg",
+			stop_at_entry = false,
+			just_my_code = true,
+		},
 	},
 }
 ```
@@ -393,11 +412,12 @@ If the file is missing, pickers still work. If it is broken, the plugin notifies
 
 **Debug**
 
-1. `:CsBuild` (needs `bin/Debug/<tfm>/<Project>.dll`)
-2. `<leader>db` on a line
-3. `<leader>dr` or `:CsDebugRun`
-4. dap-ui opens; step with `<leader>do` / `<leader>di`
-5. `<leader>dt` to stop; `<leader>dd` clears all breakpoints; `<leader>dl` lists them in the quickfix
+1. `<leader>db` on a line (breakpoint)
+2. `:CsDebugRun` (or `<leader>dr`): builds, picks the launch profile when there are several, launches — dap-ui opens if you didn't wire your own
+3. Step with `<leader>do` / `<leader>di`; app output shows in the dap-ui REPL
+4. `<leader>dt` or `:CsDebugStop` to finish; `<leader>dd` clears all breakpoints
+
+Already running it with `:CsRun` / `:CsWatch` and want breakpoints? `:CsDebugAttach` → pick the `dotnet` process. `:checkhealth csnew` verifies the whole stack.
 
 **NuGet** — `:CsAddPkg Newtonsoft.Json`, `:CsListPkg`, `:CsUpdatePkg`, `:CsRemovePkg`.
 
@@ -409,7 +429,11 @@ If the file is missing, pickers still work. If it is broken, the plugin notifies
 | `Generating idempotent scripts… not supported for SQLite` | `ef.script_idempotent = false`                                                                                                                           |
 | `dotnet-ef not available`                                 | `dotnet tool install --global dotnet-ef`                                                                                                                 |
 | `netcoredbg not found`                                    | `:MasonInstall netcoredbg` (or put `netcoredbg` on `PATH`)                                                                                               |
-| `no Debug dll found`                                      | `:CsBuild` first                                                                                                                                         |
+| `no Debug dll found`                                      | `:CsDebugRun` builds first; if you see this, `dap.build` is `false` — build manually or re-enable                                                          |
+| Breakpoints don't hit                                     | `:CsDebugRun` rebuilds so the dll matches the sources; check `:checkhealth csnew`. Deeper traces: `:lua require('dap').set_log_level('TRACE')` then `:exe 'edit' stdpath('log') .. '/dap.log'` |
+| App output missing                                        | netcoredbg has no `runInTerminal`: output goes to the dap-ui **REPL** (`:DapToggleRepl`), not the "console" element                                        |
+| Attach fails on Linux                                     | check `ptrace_scope` (`:checkhealth csnew`); usually fine since .NET attach uses the runtime diagnostic channel, but restricted setups may need adjusting   |
+| `appsettings.json` / relative paths not found when debugging | fixed by `:CsDebugRun` (launches with the project's `cwd`); plain `dap.run` without `cwd` will not have it                                              |
 | Connection error to `localhost:5432` / SQL Server         | Not the plugin — Postgres/SQL is down or the connection string is wrong                                                                                  |
 | Snippets do nothing                                       | LuaSnip in `dependencies`, and `opts = {}` so `setup()` runs                                                                                             |
 | Pickers look ugly                                         | dressing.nvim or telescope-ui-select                                                                                                                     |

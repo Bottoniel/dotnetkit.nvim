@@ -173,3 +173,18 @@ end, {
 	complete = "file",
 	desc = "Debug the current .NET project with nvim-dap",
 })
+
+vim.api.nvim_create_user_command("CsDebugAttach", function(opts)
+	require("csnew.dap").debug_attach({ project = expand(opts.fargs[1]) })
+end, {
+	nargs = "?",
+	complete = "file",
+	desc = "Attach nvim-dap to a running .NET process (e.g. :CsRun / :CsWatch)",
+})
+
+vim.api.nvim_create_user_command("CsDebugStop", function()
+	require("csnew.dap").debug_stop()
+end, {
+	nargs = 0,
+	desc = "Stop the active nvim-dap session",
+})
