@@ -6,6 +6,61 @@ local M = {}
 local job_id
 local term_buf = -1
 
+-- Drop // and /* */ comments and trailing commas, leaving string contents
+-- alone. Visual Studio and the dotnet CLI accept both in launchSettings.json;
+-- a strict JSON decoder does not.
+function M.strip_jsonc(text)
+	local out = {}
+	local i, n = 1, #text
+	local in_string = false
+	local pending_comma -- index in `out` of a comma that may turn out to be trailing
+	while i <= n do
+		local c = text:sub(i, i)
+		local next_c = text:sub(i + 1, i + 1)
+		if in_string then
+			out[#out + 1] = c
+			if c == "\\" then
+				out[#out + 1] = next_c
+				i = i + 1
+			elseif c == '"' then
+				in_string = false
+			end
+			i = i + 1
+		elseif c == "/" and next_c == "/" then
+			i = text:find("\n", i, true) or (n + 1)
+		elseif c == "/" and next_c == "*" then
+			local _, close = text:find("*/", i + 2, true)
+			i = close and (close + 1) or (n + 1)
+		else
+			if c == '"' then
+				in_string = true
+				pending_comma = nil
+			elseif c == "," then
+				pending_comma = #out + 1
+			elseif c == "}" or c == "]" then
+				if pending_comma then
+					out[pending_comma] = ""
+				end
+				pending_comma = nil
+			elseif not c:match("%s") then
+				pending_comma = nil
+			end
+			out[#out + 1] = c
+			i = i + 1
+		end
+	end
+	return table.concat(out)
+end
+
+local function decode_json(text)
+	local ok, decoded = pcall(vim.json.decode, text)
+	if ok then
+		return decoded
+	end
+	ok, decoded = pcall(vim.json.decode, M.strip_jsonc(text))
+	return ok and decoded or nil
+end
+
 -- Full launchSettings.json profiles: { { name, env, args }, ... } sorted by name.
 -- env comes from environmentVariables (+ applicationUrl as ASPNETCORE_URLS);
 -- args comes from commandLineArgs split on whitespace. Only "Project" profiles.
@@ -14,9 +69,8 @@ function M.launch_profiles(path)
 	if not ok then
 		return {}
 	end
-	local decoded
-	ok, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
-	if not ok or type(decoded) ~= "table" or type(decoded.profiles) ~= "table" then
+	local decoded = decode_json(table.concat(lines, "\n"))
+	if type(decoded) ~= "table" or type(decoded.profiles) ~= "table" then
 		return {}
 	end
 	local out = {}
@@ -109,7 +163,8 @@ end
 local function start_term(args, cwd)
 	stop_job()
 	local cmd = { "dotnet", unpack(args) }
-	cwd = cwd or dotnet.workspace_root()
+	local root = dotnet.workspace_root() -- before the terminal takes over
+	cwd = cwd or root
 	local win
 	if vim.api.nvim_buf_is_valid(term_buf) then
 		for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -126,11 +181,17 @@ local function start_term(args, cwd)
 		pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
 		term_buf = new_buf
 	else
+		-- the previous terminal lost its window (the split was closed): drop
+		-- it, or every run would leave one more dead buffer behind
+		if vim.api.nvim_buf_is_valid(term_buf) then
+			pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
+		end
 		vim.cmd("botright vsplit")
 		term_buf = vim.api.nvim_create_buf(true, false)
 		vim.api.nvim_win_set_buf(0, term_buf)
 		vim.api.nvim_win_set_width(0, math.max(40, math.floor(vim.o.columns * 0.4)))
 	end
+	dotnet.remember_root(term_buf, root)
 	job_id = open_term(cmd, { cwd = cwd })
 end
 
@@ -176,7 +237,7 @@ local function resolve_runnable(prompt, preset, go)
 		return
 	end
 	if #runnable == 0 then
-		vim.notify("csnew: no runnable project found (needs OutputType=Exe or a Web/Worker SDK)", vim.log.levels.WARN)
+		vim.notify("dotnetkit: no runnable project found (needs OutputType=Exe or a Web/Worker SDK)", vim.log.levels.WARN)
 		return
 	end
 	if #runnable == 1 then
@@ -217,7 +278,7 @@ function M.stop()
 		pcall(vim.api.nvim_buf_delete, term_buf, { force = true })
 		term_buf = -1
 	end
-	vim.notify("csnew: stopped", vim.log.levels.INFO)
+	vim.notify("dotnetkit: stopped", vim.log.levels.INFO)
 end
 
 return M

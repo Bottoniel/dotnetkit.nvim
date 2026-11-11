@@ -23,7 +23,7 @@ function M.load()
 
 	local warned = entry and entry.warned
 	if not warned then
-		vim.notify("csnew: found .csnew.lua, Neovim may ask you to trust it", vim.log.levels.INFO)
+		vim.notify("dotnetkit: found .csnew.lua, Neovim may ask you to trust it", vim.log.levels.INFO)
 		warned = true
 	end
 
@@ -36,7 +36,7 @@ function M.load()
 	local chunk, load_err = load(contents, "@" .. path, "t", {})
 	if not chunk then
 		if not entry or entry.notify ~= load_err then
-			vim.notify("csnew: invalid .csnew.lua\n" .. load_err, vim.log.levels.ERROR)
+			vim.notify("dotnetkit: invalid .csnew.lua\n" .. load_err, vim.log.levels.ERROR)
 		end
 		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, notify = load_err, warned = warned }
 		return nil
@@ -46,7 +46,7 @@ function M.load()
 	if not ok or type(result) ~= "table" then
 		local err = ok and ".csnew.lua must return a table" or result
 		if not entry or entry.notify ~= err then
-			vim.notify("csnew: invalid .csnew.lua\n" .. tostring(err), vim.log.levels.ERROR)
+			vim.notify("dotnetkit: invalid .csnew.lua\n" .. tostring(err), vim.log.levels.ERROR)
 		end
 		cache[root] = { sec = stat.mtime.sec, nsec = stat.mtime.nsec, notify = err, warned = warned }
 		return nil

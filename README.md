@@ -6,7 +6,7 @@ Requires **Neovim 0.10+**.
 
 ## Features
 
-- Create C# types (class, interface, record, enum, controller, exception) with file-scoped namespace inferred from the `.csproj`
+- Create C# types (class, interface, record, enum, controller, exception) with the namespace inferred from the `.csproj` and syntax matched to the project's C# version
 - LuaSnip snippets (`cls`, `iface`, `rec`, `enm`, `ctrl`, `exc`)
 - Add/remove project references and solution entries (`.sln` and `.slnx`)
 - NuGet: add, list (with outdated), remove, update
@@ -28,11 +28,11 @@ Requires **Neovim 0.10+**.
 | [nvim-dap-ui](https://github.com/rcarriga/nvim-dap-ui) + [nvim-nio](https://github.com/nvim-neotest/nvim-nio)                                   | optional: debug UI (dotnetkit wires it when present) |
 | [dressing.nvim](https://github.com/stevearc/dressing.nvim) or [telescope-ui-select](https://github.com/nvim-telescope/telescope-ui-select.nvim) | nicer pickers (`vim.ui.select`)                      |
 | [nvim-tree.lua](https://github.com/nvim-tree/nvim-tree.lua)                                                                                     | optional: create a type on the node under the cursor |
-| roslyn / OmniSharp LSP                                                                                                                          | post-change `:LspRestart` actually reloads C#        |
+| roslyn / OmniSharp LSP                                                                                                                          | the post-change restart of the C# server             |
 
 ## Install (lazy.nvim)
 
-Lua API stays `require("csnew")` (setup, create, dap). The GitHub repo is `dotnetkit.nvim`.
+Lua API stays `require("csnew")` (setup, create, dap); `require("dotnetkit")` is an alias for it. The GitHub repo is `dotnetkit.nvim`. Help is in `:help dotnetkit`.
 
 ### Minimal
 
@@ -67,7 +67,7 @@ Core commands only. No snippets, no debug.
 }
 ```
 
-`opts = {}` calls `require("csnew").setup({})`. Without `setup()`, snippets are not registered.
+`opts = {}` calls `setup({})`. Without `setup()`, snippets are not registered.
 
 ### Recommended
 
@@ -208,7 +208,7 @@ Or install once by hand: `:MasonInstall csharpier` and `:MasonInstall netcoredbg
 
 ### Debug (nvim-dap)
 
-dotnetkit does **not** install nvim-dap, but it does carry **all the wiring**: the netcoredbg adapter, launch/attach configurations (registered as a `dap.providers.configs` provider, so `dap.continue()` offers them), `launchSettings.json` env/args, a build before launching, and dap-ui. Your spec only needs the plugins and the keys you want (~8 lines instead of ~40):
+dotnetkit does **not** install nvim-dap, but it does carry **all the wiring**: the netcoredbg adapter (unless you already registered a `coreclr` adapter, which is left alone), launch/attach configurations (registered as a `dap.providers.configs` provider, so `dap.continue()` offers them), `launchSettings.json` env/args, a build before launching, and dap-ui. Your spec only needs the plugins and the keys you want (~8 lines instead of ~40):
 
 ```lua
 {
@@ -229,11 +229,11 @@ Don't want your own keys? Set `dap = { keymaps = "<leader>d" }` in the dotnetkit
 
 What you get:
 
-- `:CsDebugRun` — builds the project first (errors go to the quickfix and the session is **not** started), applies `launchSettings.json` (picker when there are several profiles, same UX as `:CsRun`), then launches netcoredbg with the project's `cwd`, the profile's env (`ASPNETCORE_ENVIRONMENT`, `ASPNETCORE_URLS`, …) and args. Because it rebuilds, breakpoints always match the sources — no more silently debugging a stale dll. From a library file it offers the runnable projects instead of trying to launch the library.
-- `dap.continue()` — offers `dotnetkit: launch <Project>` and `dotnetkit: attach`.
-- `:CsDebugAttach` — attach to a live .NET process (e.g. the one `:CsRun` / `:CsWatch` left running), filtered to `dotnet` / the project's assembly name.
+- `:CsDebugRun` — builds the project first (errors go to the quickfix and the session is **not** started), applies `launchSettings.json` (picker when there are several profiles, same UX as `:CsRun`), then launches netcoredbg with the project's `cwd`, the profile's env (`ASPNETCORE_ENVIRONMENT`, `ASPNETCORE_URLS`, …) and args. Because it rebuilds, breakpoints always match the sources — no more silently debugging a stale dll. From a library file it offers the runnable projects instead of trying to launch the library. Running it again for the project you are already debugging restarts that session.
+- `dap.continue()` — offers `dotnetkit: launch <Project>` and `dotnetkit: attach`. Picking a launch entry goes through the same steps as `:CsDebugRun` (build, port pre-flight); the only difference is the launch profile, which is applied when there is exactly one and never asked for.
+- `:CsDebugAttach` — attach to a live .NET process (e.g. the one `:CsRun` / `:CsWatch` left running). The picker lists the apps of the workspace's runnable projects — matched by assembly name, because `dotnet run` starts the app through its own executable — plus any other dotnet-hosted process, and leaves out the `dotnet` CLI itself, build servers and language servers. `:CsDebugAttach <project>` narrows it to one project.
 - `:CsDebugStop` — terminate the session.
-- **Port pre-flight**: before launching, the port from the profile's `applicationUrl` is checked. If something is already listening — typically your own app, left over from a session whose debugger died — you get a prompt offering to attach to it, kill it and launch, or launch anyway, instead of Kestrel throwing an unhandled `AddressInUseException` mid-session. `dap.port_check = false` turns it off.
+- **Port pre-flight**: before launching, the port from the profile's `applicationUrl` is checked. If something is already listening — typically your own app, left over from a session whose debugger died — you get a prompt offering to attach to it (straight to the process holding the port, no second picker), kill it and launch, or launch anyway, instead of Kestrel throwing an unhandled `AddressInUseException` mid-session. `dap.port_check = false` turns it off.
 - **dap-ui**: when `nvim-dap-ui` is installed and you have **not** wired it yourself (no `dapui_config` listeners, no `dapui.setup()`), dotnetkit calls `setup()` and opens/closes the UI around sessions. The layout it applies drops the `console` element — with netcoredbg it never fills (see below) — and gives `scopes` the room the breakpoint list does not need. If you already wired dap-ui yourself — like the classic `dapui_config` snippet — dotnetkit detects that and stays out of the way, layout included, so configuring `dapui.setup({ layouts = ... })` on your side is how you override it. `dap = { ui = false }` disables all of it.
 
 Where the app output goes: netcoredbg does not implement `runInTerminal`, so stdout arrives in the dap-ui **REPL** (`:DapToggleRepl`), not in the "console" element. That is expected, not a bug.
@@ -245,7 +245,7 @@ Run `:checkhealth csnew` to see the whole stack at a glance: dotnet, dotnet-ef, 
 | Option           | Default    | Meaning                                                                  |
 | ---------------- | ---------- | ------------------------------------------------------------------------ |
 | `dap.ui`         | `"auto"`   | `"auto"`/`true`: manage dap-ui if the user didn't; `false`: never touch |
-| `dap.build`      | `true`     | `dotnet build <csproj>` before launching                                |
+| `dap.build`      | `true`     | `dotnet build <csproj> -c <configuration>` before launching             |
 | `dap.profile`    | `true`     | apply `launchSettings.json` env + args                                   |
 | `dap.port_check` | `true`     | check the profile's port before launching (see below)                    |
 | `dap.configuration` | `"Debug"` | looks under `bin/<configuration>/` (RID subfolders included)            |
@@ -283,7 +283,7 @@ Run `:checkhealth csnew` to see the whole stack at a glance: dotnet, dotnet-ef, 
 
 Arguments are optional. Missing pieces are asked with `vim.ui.select` / `vim.ui.input`.
 
-After sln / reference / package changes the plugin runs `dotnet clean` + `dotnet restore` on the solution and `:LspRestart` (configurable).
+After sln / reference / package changes the plugin runs `dotnet restore` on the solution and restarts the C# language server — only that one, your other servers keep running. The steps are configurable (`dotnet.after_change`); add `"clean"` if you want a `dotnet clean` first, at the price of a full rebuild on the next build.
 
 ## Snippets
 
@@ -301,6 +301,8 @@ In a `.cs` buffer, type the trigger and expand with your LuaSnip / nvim-cmp mapp
 | `exc`   | exception  | `Exception` suffix if missing  |
 
 Namespace is `RootNamespace` (or the `.csproj` name) plus folders relative to the project.
+
+Both `:CsNew` and the snippets match the syntax to the project: file-scoped namespaces need C# 10 and the exception's primary constructor needs C# 12, so older targets (`netstandard2.0`, .NET Framework, an explicit `<LangVersion>`) get a block namespace and a classic constructor. When the `.csproj` does not state its target, modern syntax is used. The exception template adds `using System;` unless the `.csproj` enables `<ImplicitUsings>`.
 
 ## Optional: nvim-tree
 
@@ -351,8 +353,9 @@ That enables snippets and default `after_change`. To override defaults, put the 
 	-- ...
 	opts = {
 		dotnet = {
-			-- after sln / reference / package changes (runs on the .sln)
-			after_change = { "clean", "restore", "lsp_restart" },
+			-- after sln / reference / package changes (runs on the .sln);
+			-- "clean" is also a valid step
+			after_change = { "restore", "lsp_restart" },
 		},
 		ef = {
 			-- optional globals; better set per repo in .csnew.lua (below)
@@ -363,6 +366,7 @@ That enables snippets and default `after_change`. To override defaults, put the 
 			ui = "auto",
 			build = true,
 			profile = true,
+			port_check = true,
 			configuration = "Debug",
 			keymaps = false,
 			-- netcoredbg = "/path/to/netcoredbg",
@@ -380,7 +384,7 @@ All `ef.*` keys are optional. With nothing set:
 - one `.csproj` in the repo → used as both `--project` and `--startup-project`
 - several → two pickers (migrations project, then startup). The choice is remembered for the session (`Use last: X -> Y`)
 
-Empty tables count as **lists**, and lists replace the default instead of merging. `after_change = {}` therefore disables every post-change step — and by the same rule an empty `dotnet = {}` clears that whole section rather than merging with the defaults.
+Sections merge key by key; lists replace the default instead of merging. `after_change = {}` therefore disables every post-change step (the EF commands then skip their language-server restart too), while an empty section such as `dap = {}` simply keeps the defaults.
 
 ### Per-repo: `.csnew.lua`
 
@@ -431,7 +435,7 @@ Already running it with `:CsRun` / `:CsWatch` and want breakpoints? `:CsDebugAtt
 | `Generating idempotent scripts… not supported for SQLite` | `ef.script_idempotent = false`                                                                                                                           |
 | `dotnet-ef not available`                                 | `dotnet tool install --global dotnet-ef`                                                                                                                 |
 | `netcoredbg not found`                                    | `:MasonInstall netcoredbg` (or put `netcoredbg` on `PATH`)                                                                                               |
-| `no Debug dll found`                                      | `:CsDebugRun` builds first; if you see this, `dap.build` is `false` — build manually or re-enable                                                          |
+| `no Debug dll found`                                      | `dap.build` is `false` (build manually or re-enable it), or the project writes its output outside `bin/<configuration>/`                                  |
 | Breakpoints don't hit                                     | `:CsDebugRun` rebuilds so the dll matches the sources; check `:checkhealth csnew`. Deeper traces: `:lua require('dap').set_log_level('TRACE')` then `:exe 'edit' stdpath('log') .. '/dap.log'` |
 | App output missing                                        | netcoredbg has no `runInTerminal`: output goes to the dap-ui **REPL** (`:DapToggleRepl`), not the "console" element                                        |
 | Attach fails on Linux                                     | check `ptrace_scope` (`:checkhealth csnew`); usually fine since .NET attach uses the runtime diagnostic channel, but restricted setups may need adjusting   |
@@ -440,6 +444,10 @@ Already running it with `:CsRun` / `:CsWatch` and want breakpoints? `:CsDebugAtt
 | Snippets do nothing                                       | LuaSnip in `dependencies`, and `opts = {}` so `setup()` runs                                                                                             |
 | Pickers look ugly                                         | dressing.nvim or telescope-ui-select                                                                                                                     |
 
+## Development
+
+`make test` runs the test suite (`tests/`, plenary.nvim's busted runner). It needs [plenary.nvim](https://github.com/nvim-lua/plenary.nvim), found automatically in the lazy.nvim data directory or given as `PLENARY_DIR=/path/to/plenary.nvim`.
+
 ## License
 
-MIT
+[MIT](LICENSE)

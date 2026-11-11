@@ -19,7 +19,7 @@ local function maybe_add_to_sln(project_path)
 	local function add(sln)
 		dotnet.run({ "sln", sln, "add", project_path }, function()
 			reload_tree()
-		end, { success_msg = "csnew: added to solution " .. vim.fn.fnamemodify(project_path, ":t") })
+		end, { success_msg = "dotnetkit: added to solution " .. vim.fn.fnamemodify(project_path, ":t") })
 	end
 	vim.ui.select({ "Yes", "No" }, { prompt = "Add to solution?" }, function(choice)
 		if choice ~= "Yes" then
@@ -39,7 +39,7 @@ function M.create(opts)
 
 	local function run(template, name, outdir)
 		if not name or name == "" or not name:match("^[%a_][%w_.%-]*$") then
-			vim.notify("csnew: invalid project name", vim.log.levels.ERROR)
+			vim.notify("dotnetkit: invalid project name", vim.log.levels.ERROR)
 			return
 		end
 		outdir = outdir ~= "" and outdir or ("src/" .. name)
@@ -54,15 +54,14 @@ function M.create(opts)
 			dotnet.invalidate_cache()
 			local csproj = outdir .. "/" .. name .. ".csproj"
 			if vim.fn.filereadable(csproj) ~= 1 then
-				local found = vim.fn.glob(outdir .. "/*.csproj", false, true)
-				csproj = found[1]
+				csproj = require("csnew.namespace").find_csproj(outdir, outdir)
 			end
 			if csproj then
 				maybe_add_to_sln(dotnet.normalize(csproj))
 			else
 				reload_tree()
 			end
-		end, { success_msg = "csnew: created " .. template .. " " .. name })
+		end, { success_msg = "dotnetkit: created " .. template .. " " .. name })
 	end
 
 	local function ask_outdir(template, name)

@@ -63,7 +63,7 @@ function M.add(opts)
 				if ok then
 					dotnet.post_change_with_solution()
 				end
-			end, { success_msg = "csnew: added package " .. name })
+			end, { success_msg = "dotnetkit: added package " .. name })
 		end
 
 		local function ask_version(name)
@@ -72,6 +72,10 @@ function M.add(opts)
 				return
 			end
 			vim.ui.input({ prompt = "Version (empty = latest): " }, function(version)
+				-- nil is <Esc>: cancel. Only an empty answer means "latest".
+				if version == nil then
+					return
+				end
 				run_add(name, version)
 			end)
 		end
@@ -100,7 +104,7 @@ function M.list(opts)
 			end
 			local rows = M.parse_list_json(stdout)
 			if #rows == 0 then
-				vim.notify("csnew: no packages found", vim.log.levels.WARN)
+				vim.notify("dotnetkit: no packages found", vim.log.levels.WARN)
 				return
 			end
 			for _, row in ipairs(rows) do
@@ -118,7 +122,7 @@ function M.list(opts)
 			end
 			dotnet.run({ "list", target, "package", "--outdated", "--format", "json" }, function(ok2, stdout2)
 				if not ok2 then
-					vim.notify("csnew: could not check for newer versions", vim.log.levels.WARN)
+					vim.notify("dotnetkit: could not check for newer versions", vim.log.levels.WARN)
 					show()
 					return
 				end
@@ -133,12 +137,12 @@ function M.list(opts)
 				end
 				show()
 			end, {
-				progress_msg = "csnew: checking for newer versions",
+				progress_msg = "dotnetkit: checking for newer versions",
 				success_msg = false,
 				fail_msg = false,
 			})
 		end, {
-			progress_msg = "csnew: listing packages",
+			progress_msg = "dotnetkit: listing packages",
 			success_msg = false,
 		})
 	end)
@@ -152,7 +156,7 @@ function M.remove(opts)
 		end
 		local pkgs = M.parse_csproj_packages(target)
 		if #pkgs == 0 then
-			vim.notify("csnew: no packages to remove", vim.log.levels.WARN)
+			vim.notify("dotnetkit: no packages to remove", vim.log.levels.WARN)
 			return
 		end
 
@@ -161,7 +165,7 @@ function M.remove(opts)
 				if ok then
 					dotnet.post_change_with_solution()
 				end
-			end, { success_msg = "csnew: removed package " .. name })
+			end, { success_msg = "dotnetkit: removed package " .. name })
 		end
 
 		if opts.name and opts.name ~= "" then
@@ -193,7 +197,7 @@ function M.update(opts)
 				if ok then
 					dotnet.post_change_with_solution()
 				end
-			end, { success_msg = "csnew: updated package " .. name })
+			end, { success_msg = "dotnetkit: updated package " .. name })
 		end
 
 		if opts.name and opts.name ~= "" then
@@ -212,7 +216,7 @@ function M.update(opts)
 				end
 			end
 			if #outdated == 0 then
-				vim.notify("csnew: all packages are up to date", vim.log.levels.INFO)
+				vim.notify("dotnetkit: all packages are up to date", vim.log.levels.INFO)
 				return
 			end
 			vim.ui.select(outdated, {
@@ -226,7 +230,7 @@ function M.update(opts)
 				end
 			end)
 		end, {
-			progress_msg = "csnew: checking outdated packages",
+			progress_msg = "dotnetkit: checking outdated packages",
 			success_msg = false,
 		})
 	end)

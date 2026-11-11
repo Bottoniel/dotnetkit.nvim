@@ -13,7 +13,7 @@ function M.add(opts)
 
 	local target = opts.project or M.current_project()
 	if not target then
-		vim.notify("csnew: no .csproj found for current file", vim.log.levels.ERROR)
+		vim.notify("dotnetkit: no .csproj found for current file", vim.log.levels.ERROR)
 		return
 	end
 	target = dotnet.normalize(target)
@@ -21,7 +21,7 @@ function M.add(opts)
 	if opts.reference and opts.reference ~= "" then
 		local reference = dotnet.normalize(opts.reference)
 		if vim.fn.filereadable(reference) ~= 1 then
-			vim.notify("csnew: project not found " .. reference, vim.log.levels.ERROR)
+			vim.notify("dotnetkit: project not found " .. reference, vim.log.levels.ERROR)
 			return
 		end
 		dotnet.run({ "add", target, "reference", reference }, function(ok)
@@ -29,7 +29,7 @@ function M.add(opts)
 				dotnet.invalidate_cache()
 				dotnet.post_change_with_solution()
 			end
-		end, { success_msg = "csnew: added reference " .. vim.fn.fnamemodify(reference, ":t") })
+		end, { success_msg = "dotnetkit: added reference " .. vim.fn.fnamemodify(reference, ":t") })
 		return
 	end
 
@@ -46,7 +46,7 @@ function M.add(opts)
 	end
 
 	if #candidates == 0 then
-		vim.notify("csnew: no projects available to reference", vim.log.levels.WARN)
+		vim.notify("dotnetkit: no projects available to reference", vim.log.levels.WARN)
 		return
 	end
 
@@ -62,7 +62,7 @@ function M.add(opts)
 					dotnet.invalidate_cache()
 					dotnet.post_change_with_solution()
 				end
-			end, { success_msg = "csnew: added reference " .. vim.fn.fnamemodify(choice, ":t") })
+			end, { success_msg = "dotnetkit: added reference " .. vim.fn.fnamemodify(choice, ":t") })
 		end
 	end)
 end
@@ -72,14 +72,14 @@ function M.remove(opts)
 
 	local target = opts.project or M.current_project()
 	if not target then
-		vim.notify("csnew: no .csproj found for current file", vim.log.levels.ERROR)
+		vim.notify("dotnetkit: no .csproj found for current file", vim.log.levels.ERROR)
 		return
 	end
 	target = dotnet.normalize(target)
 
 	local refs = dotnet.csproj_references(target)
 	if #refs == 0 then
-		vim.notify("csnew: no references to remove", vim.log.levels.WARN)
+		vim.notify("dotnetkit: no references to remove", vim.log.levels.WARN)
 		return
 	end
 
@@ -90,7 +90,7 @@ function M.remove(opts)
 				dotnet.invalidate_cache()
 				dotnet.post_change_with_solution()
 			end
-		end, { success_msg = "csnew: removed reference " .. vim.fn.fnamemodify(reference, ":t") })
+		end, { success_msg = "dotnetkit: removed reference " .. vim.fn.fnamemodify(reference, ":t") })
 		return
 	end
 
@@ -106,7 +106,7 @@ function M.remove(opts)
 					dotnet.invalidate_cache()
 					dotnet.post_change_with_solution()
 				end
-			end, { success_msg = "csnew: removed reference " .. vim.fn.fnamemodify(choice, ":t") })
+			end, { success_msg = "dotnetkit: removed reference " .. vim.fn.fnamemodify(choice, ":t") })
 		end
 	end)
 end

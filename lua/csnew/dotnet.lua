@@ -1,8 +1,6 @@
 local M = {}
 
-local function trim(s)
-	return (s:gsub("^%s+", ""):gsub("%s+$", ""))
-end
+local DEFAULT_AFTER_CHANGE = { "restore", "lsp_restart" }
 
 local function normalize(path)
 	path = vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
@@ -15,99 +13,155 @@ end
 
 M.normalize = normalize
 
+-- Start `dotnet <args>` in the workspace root, so global.json and the local
+-- tool manifest (where dotnet-ef often lives) resolve against the repo and not
+-- against wherever Neovim happens to be.
+-- Returns false, after notifying, when the process could not be started at
+-- all; cb is never called in that case.
 function M.run(args, cb, opts)
 	if not vim.system then
-		vim.notify("csnew: requires neovim 0.10+", vim.log.levels.ERROR)
-		return
+		vim.notify("dotnetkit: requires neovim 0.10+", vim.log.levels.ERROR)
+		return false
 	end
 	opts = opts or {}
+	if vim.fn.executable("dotnet") ~= 1 then
+		vim.notify("dotnetkit: dotnet not found on PATH", vim.log.levels.ERROR)
+		return false
+	end
+	local ok, err = pcall(
+		vim.system,
+		{ "dotnet", unpack(args) },
+		{ text = true, cwd = opts.cwd or M.workspace_root() },
+		function(res)
+			vim.schedule(function()
+				if res.code == 0 then
+					if opts.success_msg ~= false then
+						vim.notify(opts.success_msg or ("dotnet " .. table.concat(args, " ")), vim.log.levels.INFO)
+					end
+					if cb then
+						cb(true, res.stdout, res.stderr)
+					end
+				else
+					if opts.fail_msg ~= false then
+						local detail = res.stderr
+						if detail == nil or vim.trim(detail) == "" then
+							detail = res.stdout
+						end
+						vim.notify("dotnetkit: dotnet failed\n" .. vim.trim(detail or ""), vim.log.levels.ERROR)
+					end
+					if cb then
+						cb(false, res.stdout, res.stderr)
+					end
+				end
+			end)
+		end
+	)
+	if not ok then
+		vim.notify("dotnetkit: could not start dotnet\n" .. tostring(err), vim.log.levels.ERROR)
+		return false
+	end
 	if opts.progress_msg then
 		vim.notify(opts.progress_msg, vim.log.levels.INFO)
 	end
-	vim.system({ "dotnet", unpack(args) }, { text = true }, function(res)
-		vim.schedule(function()
-			if res.code == 0 then
-				if opts.success_msg ~= false then
-					vim.notify(opts.success_msg or ("dotnet " .. table.concat(args, " ")), vim.log.levels.INFO)
-				end
-				if cb then
-					cb(true, res.stdout, res.stderr)
-				end
-			else
-				if opts.fail_msg ~= false then
-					local detail = res.stderr
-					if detail == nil or trim(detail) == "" then
-						detail = res.stdout
-					end
-					vim.notify("csnew: dotnet failed\n" .. trim(detail or ""), vim.log.levels.ERROR)
-				end
-				if cb then
-					cb(false, res.stdout, res.stderr)
-				end
-			end
-		end)
-	end)
+	return true
 end
 
+-- The git root of the current buffer's file, or of the cwd for a buffer
+-- without one, falling back to the cwd itself.
+-- The buffers this plugin opens (the run terminal, the scratch lists) carry
+-- the workspace they were opened from in b:csnew_root: the cursor ends up in
+-- them, and if Neovim was started outside the repo the cwd would otherwise
+-- turn $HOME, or wherever it is, into the workspace for the next command.
 function M.workspace_root()
-	local root = vim.fs.root(0, { ".git" })
-	if not root then
-		root = vim.fn.getcwd()
+	local remembered = vim.b.csnew_root
+	if type(remembered) == "string" and vim.fn.isdirectory(remembered) == 1 then
+		return remembered
 	end
-	return normalize(root)
+	return normalize(vim.fs.root(0, { ".git" }) or vim.fn.getcwd())
 end
 
-local function excluded(path)
-	local p = path:gsub("\\", "/")
-	return p:match("/bin/") or p:match("/obj/") or p:match("/node_modules/") or p:match("/artifacts/")
-		or p:match("/%.vs/")
+-- Tag a buffer the plugin opened with the workspace it belongs to.
+function M.remember_root(buf, root)
+	vim.b[buf].csnew_root = root
 end
 
--- results are copied on return so callers cannot mutate the cache
-local file_cache = {}
+-- Directories that are never descended into. Matched against the directory's
+-- own name, below the root, so a repo that itself lives under a folder called
+-- "bin" is still scanned.
+local SKIP_DIRS = {
+	bin = true,
+	obj = true,
+	node_modules = true,
+	artifacts = true,
+	[".git"] = true,
+	[".vs"] = true,
+}
+
 local CACHE_TTL = 5000
+
+-- root -> { at, projects, solutions }
+local scan_cache = {}
 
 -- keyed by csproj path, invalidated by the file's own mtime
 local runnable_cache = {}
 
-local function find_files(root, suffixes)
-	local key = root .. "|" .. table.concat(suffixes, ",")
+-- One pruned walk collects projects and solutions together.
+local function scan(root)
 	local now = vim.uv.now()
-	local entry = file_cache[key]
+	local entry = scan_cache[root]
 	if entry and (now - entry.at) < CACHE_TTL then
-		return vim.deepcopy(entry.results)
+		return entry
 	end
-	local found = vim.fs.find(function(name, path)
-		if excluded(path .. "/" .. name) then
-			return false
-		end
-		for _, suffix in ipairs(suffixes) do
-			if name:sub(-#suffix) == suffix then
-				return true
+
+	local projects, solutions = {}, {}
+	local stack = { root }
+	while #stack > 0 do
+		local dir = table.remove(stack)
+		local handle = vim.uv.fs_scandir(dir)
+		while handle do
+			local name, kind = vim.uv.fs_scandir_next(handle)
+			if not name then
+				break
+			end
+			local path = dir == "/" and ("/" .. name) or (dir .. "/" .. name)
+			if kind == nil or kind == "unknown" then
+				-- some filesystems do not report the entry type
+				local stat = vim.uv.fs_lstat(path)
+				kind = stat and stat.type or nil
+			end
+			if kind == "directory" then
+				if not SKIP_DIRS[name] then
+					stack[#stack + 1] = path
+				end
+			elseif kind == "file" then
+				if name:sub(-7) == ".csproj" then
+					projects[#projects + 1] = path
+				elseif name:sub(-4) == ".sln" or name:sub(-5) == ".slnx" then
+					solutions[#solutions + 1] = path
+				end
 			end
 		end
-		return false
-	end, { path = root, type = "file", full_path = true, limit = math.huge })
-	local results = {}
-	for _, f in ipairs(found) do
-		table.insert(results, normalize(f))
 	end
-	table.sort(results)
-	file_cache[key] = { at = now, results = results }
-	return vim.deepcopy(results)
+	table.sort(projects)
+	table.sort(solutions)
+
+	entry = { at = now, projects = projects, solutions = solutions }
+	scan_cache[root] = entry
+	return entry
 end
 
 function M.invalidate_cache()
-	file_cache = {}
+	scan_cache = {}
 	runnable_cache = {}
 end
 
+-- results are copied on return so callers cannot mutate the cache
 function M.find_projects(root)
-	return find_files(root, { ".csproj" })
+	return vim.list_extend({}, scan(root).projects)
 end
 
 function M.find_solutions(root)
-	return find_files(root, { ".sln", ".slnx" })
+	return vim.list_extend({}, scan(root).solutions)
 end
 
 function M.relative_display(path, root)
@@ -122,7 +176,7 @@ end
 function M.pick_solution(cb)
 	local solutions = M.find_solutions(M.workspace_root())
 	if #solutions == 0 then
-		vim.notify("csnew: no .sln found in " .. M.workspace_root(), vim.log.levels.ERROR)
+		vim.notify("dotnetkit: no .sln found in " .. M.workspace_root(), vim.log.levels.ERROR)
 		return
 	end
 	if #solutions == 1 then
@@ -217,34 +271,100 @@ function M.is_runnable(csproj_path)
 	return value
 end
 
-function M.lsp_restart()
-	if vim.fn.exists(":LspRestart") == 2 then
-		pcall(vim.cmd, "LspRestart")
+local function is_csharp_client(client)
+	local name = (client.name or ""):lower()
+	return name:find("roslyn", 1, true) ~= nil
+		or name:find("omnisharp", 1, true) ~= nil
+		or name:find("csharp", 1, true) ~= nil
+end
+
+-- Last resort when neither `:lsp restart` nor `:LspRestart` exists: stop the
+-- client and, once it is gone, re-fire FileType on its buffers so whatever
+-- started it in the first place attaches a fresh one.
+local function restart_by_refiring_filetype(client)
+	local bufs = {}
+	for buf in pairs(client.attached_buffers or {}) do
+		table.insert(bufs, buf)
+	end
+	client:stop()
+
+	local timer = vim.uv.new_timer()
+	if not timer then
 		return
 	end
-	local clients = {}
-	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_get_option_value("filetype", { buf = buf }) == "cs" then
-			for _, client in ipairs(vim.lsp.get_clients({ bufnr = buf })) do
-				if client.name:match("roslyn") or client.name:match("omnisharp") or client.name:match("csharp") then
-					clients[client.id] = true
+	local tries = 0
+	timer:start(
+		100,
+		100,
+		vim.schedule_wrap(function()
+			if timer:is_closing() then
+				return
+			end
+			tries = tries + 1
+			if not client:is_stopped() and tries < 50 then
+				return
+			end
+			timer:stop()
+			timer:close()
+			for _, buf in ipairs(bufs) do
+				if vim.api.nvim_buf_is_loaded(buf) then
+					vim.bo[buf].filetype = vim.bo[buf].filetype
 				end
+			end
+		end)
+	)
+end
+
+-- Restart the C# language servers, and only those: a bare :LspRestart takes
+-- every other server down with it.
+function M.lsp_restart()
+	local names, seen, clients = {}, {}, {}
+	for _, client in ipairs(vim.lsp.get_clients()) do
+		if is_csharp_client(client) then
+			table.insert(clients, client)
+			if not seen[client.name] then
+				seen[client.name] = true
+				table.insert(names, client.name)
 			end
 		end
 	end
-	local ids = {}
-	for id in pairs(clients) do
-		table.insert(ids, id)
+	if #clients == 0 then
+		return
 	end
-	if #ids > 0 then
-		pcall(vim.lsp.stop_client, ids)
+
+	local command
+	if vim.fn.exists(":lsp") == 2 then
+		command = "lsp restart " -- Neovim 0.12+
+	elseif vim.fn.exists(":LspRestart") == 2 then
+		command = "LspRestart " -- nvim-lspconfig
 	end
+	if command then
+		for _, name in ipairs(names) do
+			pcall(vim.cmd, command .. name)
+		end
+		return
+	end
+
+	for _, client in ipairs(clients) do
+		pcall(restart_by_refiring_filetype, client)
+	end
+end
+
+local function after_change_steps()
+	local config = require("csnew").get_config()
+	return (config.dotnet and config.dotnet.after_change) or DEFAULT_AFTER_CHANGE
+end
+
+-- True when the user's after_change list includes the step, so the commands
+-- that only want an LSP restart honor the same setting.
+function M.after_change_has(step)
+	return vim.tbl_contains(after_change_steps(), step)
 end
 
 function M.post_change_with_solution(cb)
 	local solutions = M.find_solutions(M.workspace_root())
 	if #solutions == 0 then
-		vim.notify("csnew: no .sln found, skipping clean/restore", vim.log.levels.WARN)
+		vim.notify("dotnetkit: no .sln found, skipping restore", vim.log.levels.WARN)
 		if cb then
 			cb(false)
 		end
@@ -271,14 +391,19 @@ function M.post_change_with_solution(cb)
 	end)
 end
 
+local STEP_COMMANDS = {
+	clean = { verb = "clean", label = "cleaning" },
+	restore = { verb = "restore", label = "restoring" },
+}
+
 function M.post_change(sln_path, cb)
-	local config = require("csnew").get_config()
-	local steps = (config.dotnet and config.dotnet.after_change) or { "clean", "restore", "lsp_restart" }
+	local steps = after_change_steps()
 	local name = vim.fn.fnamemodify(sln_path, ":t")
+	local ran = false
 
 	local function finish(ok)
-		if ok then
-			vim.notify("csnew: done", vim.log.levels.INFO)
+		if ok and ran then
+			vim.notify("dotnetkit: " .. name .. " is up to date", vim.log.levels.INFO)
 		end
 		if cb then
 			cb(ok)
@@ -291,22 +416,19 @@ function M.post_change(sln_path, cb)
 			return
 		end
 		local s = steps[i]
-		if s == "clean" then
-			M.run({ "clean", sln_path }, function(ok)
+		local command = STEP_COMMANDS[s]
+		if command then
+			ran = true
+			local started = M.run({ command.verb, sln_path }, function(ok)
 				if not ok then
 					finish(false)
 				else
 					step(i + 1)
 				end
-			end, { progress_msg = "csnew: cleaning " .. name })
-		elseif s == "restore" then
-			M.run({ "restore", sln_path }, function(ok)
-				if not ok then
-					finish(false)
-				else
-					step(i + 1)
-				end
-			end, { progress_msg = "csnew: restoring " .. name })
+			end, { progress_msg = "dotnetkit: " .. command.label .. " " .. name, success_msg = false })
+			if not started then
+				finish(false)
+			end
 		elseif s == "lsp_restart" then
 			M.lsp_restart()
 			step(i + 1)

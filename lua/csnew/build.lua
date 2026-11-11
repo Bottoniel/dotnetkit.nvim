@@ -64,13 +64,21 @@ local function resolve_target(preset, cb)
 		cb(current)
 		return
 	end
-	vim.notify("csnew: no .sln or .csproj to build", vim.log.levels.ERROR)
+	vim.notify("dotnetkit: no .sln or .csproj to build", vim.log.levels.ERROR)
 end
 
+-- opts.target        .sln / .csproj; resolved from the workspace when missing
+-- opts.configuration passed as -c, so the output matches what the caller
+--                    will look for under bin/<configuration>
+-- opts.on_done(ok, items)
 function M.run(opts)
 	opts = opts or {}
 	resolve_target(opts.target, function(target)
-		dotnet.run({ "build", target, "--nologo", "-v", "q" }, function(ok, stdout, stderr)
+		local args = { "build", target, "--nologo", "-v", "q" }
+		if opts.configuration and opts.configuration ~= "" then
+			vim.list_extend(args, { "-c", opts.configuration })
+		end
+		local started = dotnet.run(args, function(ok, stdout, stderr)
 			local items = M.parse_diagnostics((stdout or "") .. "\n" .. (stderr or ""))
 			vim.fn.setqflist({}, "r", { title = "dotnet build " .. vim.fn.fnamemodify(target, ":t"), items = items })
 			local errors = 0
@@ -83,8 +91,12 @@ function M.run(opts)
 				end
 			end
 			if not ok then
-				vim.cmd("copen")
-				local msg = ("csnew: build failed (%d error(s), %d warning(s))"):format(errors, warnings)
+				-- nothing to jump to when the failure has no file location
+				-- (e.g. a NuGet error); the notification carries the detail
+				if #items > 0 then
+					vim.cmd("copen")
+				end
+				local msg = ("dotnetkit: build failed (%d error(s), %d warning(s))"):format(errors, warnings)
 				if #items == 0 then
 					local detail = stderr
 					if detail == nil or trim(detail) == "" then
@@ -92,22 +104,27 @@ function M.run(opts)
 					end
 					local extra = first_nonempty(detail)
 					if extra ~= "" then
-						msg = "csnew: build failed\n" .. extra
+						msg = "dotnetkit: build failed\n" .. extra
 					end
 				end
 				vim.notify(msg, vim.log.levels.ERROR)
 			else
 				vim.cmd("cclose")
-				vim.notify(("csnew: build succeeded (%d warning(s))"):format(warnings), vim.log.levels.INFO)
+				vim.notify(("dotnetkit: build succeeded (%d warning(s))"):format(warnings), vim.log.levels.INFO)
 			end
 			if opts.on_done then
 				opts.on_done(ok, items)
 			end
 		end, {
-			progress_msg = "csnew: building " .. vim.fn.fnamemodify(target, ":t"),
+			progress_msg = "dotnetkit: building " .. vim.fn.fnamemodify(target, ":t"),
 			success_msg = false,
 			fail_msg = false,
 		})
+		-- dotnet never ran: still complete, so callers waiting on the build
+		-- (the debug launch) are not left hanging
+		if not started and opts.on_done then
+			opts.on_done(false, {})
+		end
 	end)
 end
 

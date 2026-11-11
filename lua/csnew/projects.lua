@@ -26,7 +26,7 @@ function M.pick_one(prompt, prefer, cb)
 	local root = dotnet.workspace_root()
 	local candidates = dotnet.find_projects(root)
 	if #candidates == 0 then
-		vim.notify("csnew: no .csproj found in " .. root, vim.log.levels.ERROR)
+		vim.notify("dotnetkit: no .csproj found in " .. root, vim.log.levels.ERROR)
 		return
 	end
 	if #candidates == 1 then
@@ -46,7 +46,7 @@ function M.pick_pair(cb, labels)
 	local root = dotnet.workspace_root()
 	local candidates = dotnet.find_projects(root)
 	if #candidates == 0 then
-		vim.notify("csnew: no .csproj found in " .. root, vim.log.levels.ERROR)
+		vim.notify("dotnetkit: no .csproj found in " .. root, vim.log.levels.ERROR)
 		return
 	end
 	if #candidates == 1 then

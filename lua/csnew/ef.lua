@@ -21,12 +21,37 @@ local function ensure_ef(cb)
 			cb()
 		else
 			vim.notify(
-				"csnew: dotnet-ef not available\ninstall with: dotnet tool install --global dotnet-ef\n"
+				"dotnetkit: dotnet-ef not available\ninstall with: dotnet tool install --global dotnet-ef\n"
 					.. "(the startup project needs Microsoft.EntityFrameworkCore.Design)",
 				vim.log.levels.ERROR
 			)
 		end
-	end, { success_msg = false })
+	end, { success_msg = false, fail_msg = false })
+end
+
+-- Restarting the C# server is one of the after_change steps; leaving it out
+-- there turns it off here too.
+local function restart_lsp()
+	if dotnet.after_change_has("lsp_restart") then
+		dotnet.lsp_restart()
+	end
+end
+
+-- The generated migration file (not its .Designer.cs companion), if any.
+local function find_migration(dir, name)
+	local suffix = "_" .. name .. ".cs"
+	local found
+	local handle = vim.uv.fs_scandir(dir)
+	while handle do
+		local entry = vim.uv.fs_scandir_next(handle)
+		if not entry then
+			break
+		end
+		if entry:sub(-#suffix) == suffix and (not found or entry > found) then
+			found = entry
+		end
+	end
+	return found and (dir .. "/" .. found) or nil
 end
 
 local function resolve_config_path(value, root)
@@ -46,13 +71,13 @@ local function resolve_projects(cb)
 
 	local project = resolve_config_path(cfg.project, root)
 	if project and not projects.path_exists(project) then
-		vim.notify("csnew: ef.project not found " .. project, vim.log.levels.ERROR)
+		vim.notify("dotnetkit: ef.project not found " .. project, vim.log.levels.ERROR)
 		return
 	end
 
 	local startup = resolve_config_path(cfg.startup_project, root)
 	if startup and not projects.path_exists(startup) then
-		vim.notify("csnew: ef.startup_project not found " .. startup, vim.log.levels.ERROR)
+		vim.notify("dotnetkit: ef.startup_project not found " .. startup, vim.log.levels.ERROR)
 		return
 	end
 
@@ -109,7 +134,7 @@ function M.migrate(opts)
 		resolve_projects(function(proj)
 			local function run(name)
 				if not name:match("^[%a_][%w_]*$") then
-					vim.notify("csnew: invalid migration name", vim.log.levels.ERROR)
+					vim.notify("dotnetkit: invalid migration name", vim.log.levels.ERROR)
 					return
 				end
 				local cfg = ef_config()
@@ -125,21 +150,16 @@ function M.migrate(opts)
 					local project_dir = vim.fn.isdirectory(proj.project) == 1
 							and proj.project
 						or vim.fn.fnamemodify(proj.project, ":h")
-					local dir = project_dir .. "/" .. (cfg.output_dir or "Migrations")
-					local generated
-					for _, f in ipairs(vim.fn.glob(dir .. "/*_" .. name .. ".cs", false, true)) do
-						if not f:match("%.Designer%.cs$") then
-							generated = f
-						end
-					end
+					local output_dir = (cfg.output_dir and cfg.output_dir ~= "") and cfg.output_dir or "Migrations"
+					local generated = find_migration(project_dir .. "/" .. output_dir, name)
 					if generated then
 						vim.cmd.edit(vim.fn.fnameescape(generated))
 					end
 					reload_tree()
-					dotnet.lsp_restart()
+					restart_lsp()
 				end, {
-					progress_msg = "csnew: adding migration " .. name,
-					success_msg = "csnew: migration " .. name .. " created",
+					progress_msg = "dotnetkit: adding migration " .. name,
+					success_msg = "dotnetkit: migration " .. name .. " created",
 				})
 			end
 
@@ -166,8 +186,8 @@ function M.update(opts)
 					table.insert(extra, target)
 				end
 				dotnet.run(ef_args({ "database", "update" }, proj, extra), nil, {
-					progress_msg = "csnew: updating database",
-					success_msg = "csnew: database updated",
+					progress_msg = "dotnetkit: updating database",
+					success_msg = "dotnetkit: database updated",
 				})
 			end
 
@@ -192,10 +212,10 @@ function M.remove()
 					return
 				end
 				reload_tree()
-				dotnet.lsp_restart()
+				restart_lsp()
 			end, {
-				progress_msg = "csnew: removing last migration",
-				success_msg = "csnew: last migration removed",
+				progress_msg = "dotnetkit: removing last migration",
+				success_msg = "dotnetkit: last migration removed",
 			})
 		end)
 	end)
@@ -209,7 +229,7 @@ function M.list()
 					ui.open_scratch("ef://migrations", vim.split(stdout, "\n", { trimempty = true }))
 				end
 			end, {
-				progress_msg = "csnew: listing migrations",
+				progress_msg = "dotnetkit: listing migrations",
 				success_msg = false,
 			})
 		end)
@@ -237,8 +257,8 @@ function M.script()
 					vim.cmd.edit(vim.fn.fnameescape(output))
 				end
 			end, {
-				progress_msg = "csnew: generating SQL script",
-				success_msg = "csnew: script written to " .. output,
+				progress_msg = "dotnetkit: generating SQL script",
+				success_msg = "dotnetkit: script written to " .. output,
 			})
 		end)
 	end)

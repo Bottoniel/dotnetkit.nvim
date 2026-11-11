@@ -3,12 +3,34 @@ if vim.g.loaded_csnew then
 end
 vim.g.loaded_csnew = true
 
+-- Which argument of `command` the cursor is on (1-based).
+local function arg_index(command, cmdline, cursor_pos)
+	local typed = cmdline:sub(1, cursor_pos):match(command .. "!?%s+(.*)$")
+	if not typed then
+		return 1
+	end
+	local _, words = typed:gsub("%S+", "")
+	if typed == "" or typed:match("%s$") then
+		return words + 1
+	end
+	return words
+end
+
+local function starting_with(items, lead)
+	return vim.tbl_filter(function(item)
+		return item:sub(1, #lead) == lead
+	end, items)
+end
+
 vim.api.nvim_create_user_command("CsNew", function(opts)
 	require("csnew").command(opts)
 end, {
 	nargs = "*",
-	complete = function()
-		return require("csnew.templates").kinds
+	complete = function(lead, cmdline, cursor_pos)
+		if arg_index("CsNew", cmdline, cursor_pos) ~= 1 then
+			return {} -- the second argument is a free-form type name
+		end
+		return starting_with(require("csnew.templates").kinds, lead)
 	end,
 	desc = "Create a C# type in the current directory",
 })
@@ -137,8 +159,15 @@ vim.api.nvim_create_user_command("CsNewProject", function(opts)
 	})
 end, {
 	nargs = "*",
-	complete = function()
-		return require("csnew.newproject").templates
+	complete = function(lead, cmdline, cursor_pos)
+		local index = arg_index("CsNewProject", cmdline, cursor_pos)
+		if index == 1 then
+			return starting_with(require("csnew.newproject").templates, lead)
+		end
+		if index == 3 then
+			return vim.fn.getcompletion(lead, "dir")
+		end
+		return {} -- the project name is free-form
 	end,
 	desc = "Create a new .NET project (dotnet new)",
 })

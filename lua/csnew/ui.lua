@@ -32,7 +32,7 @@ end
 local function ask_kind(preset, cb)
 	if preset and preset ~= "" then
 		if not vim.tbl_contains(templates.kinds, preset) then
-			vim.notify("csnew: unknown type " .. preset, vim.log.levels.ERROR)
+			vim.notify("dotnetkit: unknown type " .. preset, vim.log.levels.ERROR)
 			return
 		end
 		cb(preset)
@@ -64,6 +64,8 @@ function M.start(opts)
 end
 
 function M.open_scratch(name, lines)
+	local dotnet = require("csnew.dotnet")
+	local root = dotnet.workspace_root() -- before the scratch buffer takes over
 	local buf = -1
 	for _, b in ipairs(vim.api.nvim_list_bufs()) do
 		if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_get_name(b) == name then
@@ -78,6 +80,7 @@ function M.open_scratch(name, lines)
 		vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf })
 		vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
 	end
+	dotnet.remember_root(buf, root)
 	vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 	vim.api.nvim_set_option_value("modifiable", false, { buf = buf })

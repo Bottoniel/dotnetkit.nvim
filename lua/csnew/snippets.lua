@@ -16,11 +16,13 @@ local function context(kind)
 	local namespace = require("csnew.namespace")
 	local raw = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t:r")
 	local name = create.type_name(kind, raw)
-	if name == "" or not name:match("^[%a_][%w_]*$") then
+	if not create.valid_identifier(name) then
 		name = create.type_name(kind, "Name")
 	end
 	local dir = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":h")
-	return name, namespace.from_dir(dir) or "Namespace"
+	local csproj = namespace.find_csproj(dir)
+	local info = csproj and namespace.project_info(csproj) or nil
+	return name, namespace.from_dir(dir) or "Namespace", info
 end
 
 function M.register()
@@ -51,13 +53,13 @@ function M.register()
 	for _, spec in ipairs(prefixes) do
 		snippets[#snippets + 1] = s({ trig = spec.trig, name = spec.desc, desc = spec.desc }, {
 			f(function()
-				local name, ns = context(spec.kind)
-				return select(1, templates.split_at_cursor(spec.kind, name, ns))
+				local name, ns, info = context(spec.kind)
+				return select(1, templates.split_at_cursor(spec.kind, name, ns, info))
 			end, {}),
 			i(0),
 			f(function()
-				local name, ns = context(spec.kind)
-				return select(2, templates.split_at_cursor(spec.kind, name, ns))
+				local name, ns, info = context(spec.kind)
+				return select(2, templates.split_at_cursor(spec.kind, name, ns, info))
 			end, {}),
 		})
 	end

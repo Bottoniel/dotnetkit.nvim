@@ -29,32 +29,40 @@ function M.type_name(kind, name)
 	return name
 end
 
+-- Bytes >= 128 are UTF-8 letters ("Año"), which C# identifiers allow.
+function M.valid_identifier(name)
+	return name ~= "" and name:match("^[%a_\128-\255][%w_\128-\255]*$") ~= nil
+end
+
 function M.create(opts)
 	local kind = opts.kind
 	local name = M.type_name(kind, opts.name or "")
 	local dir = opts.dir or M.resolve_dir()
 	local ns = opts.namespace or namespace.from_dir(dir)
 
-	if name == "" or not name:match("^[%a_][%w_]*$") then
-		vim.notify("csnew: invalid type name", vim.log.levels.ERROR)
+	if not M.valid_identifier(name) then
+		vim.notify("dotnetkit: invalid type name", vim.log.levels.ERROR)
 		return
 	end
 	if not vim.tbl_contains(templates.kinds, kind) then
-		vim.notify("csnew: unknown type " .. tostring(kind), vim.log.levels.ERROR)
+		vim.notify("dotnetkit: unknown type " .. tostring(kind), vim.log.levels.ERROR)
 		return
 	end
 	if not ns or ns == "" then
-		vim.notify("csnew: no .csproj found and no namespace given", vim.log.levels.ERROR)
+		vim.notify("dotnetkit: no .csproj found and no namespace given", vim.log.levels.ERROR)
 		return
 	end
 
 	local path = vim.fs.joinpath and vim.fs.joinpath(dir, name .. ".cs") or (dir .. "/" .. name .. ".cs")
 	if vim.fn.filereadable(path) == 1 then
-		vim.notify("csnew: file exists " .. path, vim.log.levels.ERROR)
+		vim.notify("dotnetkit: file exists " .. path, vim.log.levels.ERROR)
 		return
 	end
 
-	local lines, cursor = templates.render(kind, name, ns)
+	-- match the syntax to the project's C# version (old targets have no
+	-- file-scoped namespaces or primary constructors)
+	local csproj = namespace.find_csproj(dir)
+	local lines, cursor = templates.render(kind, name, ns, csproj and namespace.project_info(csproj) or nil)
 	if not lines then
 		return
 	end

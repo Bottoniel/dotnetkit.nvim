@@ -2,7 +2,8 @@ local M = {}
 
 local config = {
 	dotnet = {
-		after_change = { "clean", "restore", "lsp_restart" },
+		-- steps after a sln / reference / package change; "clean" is also valid
+		after_change = { "restore", "lsp_restart" },
 	},
 	ef = {},
 	dap = {
@@ -17,8 +18,6 @@ local config = {
 	},
 }
 
--- is_list({}) is true, so an empty subtable counts as a list and replaces the
--- whole section instead of merging; that is what makes after_change = {} work.
 local function is_list(t)
 	if vim.islist then
 		return vim.islist(t)
@@ -26,11 +25,19 @@ local function is_list(t)
 	return vim.tbl_islist(t)
 end
 
+-- A real list has at least one item; {} alone says nothing about its shape.
+local function is_real_list(t)
+	return next(t) ~= nil and is_list(t)
+end
+
+-- Lists replace, sections merge. An empty table replaces only where the
+-- default is a list, so after_change = {} disables every step while dap = {}
+-- keeps the dap defaults.
 local function merge(base, override)
 	local out = vim.deepcopy(base)
 	for k, v in pairs(override or {}) do
 		if type(v) == "table" and type(out[k]) == "table" then
-			if is_list(v) then
+			if is_real_list(v) or is_real_list(out[k]) then
 				out[k] = vim.deepcopy(v)
 			else
 				out[k] = merge(out[k], v)

@@ -1,10 +1,15 @@
 local dotnet = require("csnew.dotnet")
+local namespace = require("csnew.namespace")
 local reference = require("csnew.reference")
 local projects = require("csnew.projects")
 local run = require("csnew.run")
 local build = require("csnew.build")
 
 local M = {}
+
+-- Whether coreclr is the adapter registered here, as opposed to one the user
+-- (or another plugin) had already set up.
+local own_adapter = false
 
 -- The dap section of the merged config (defaults < setup() < .csnew.lua).
 -- Read lazily so merely opening a .cs never pulls in repoconfig or nvim-dap.
@@ -68,41 +73,122 @@ function M.pick_newest_tfm(paths)
 	return scored[#scored].path
 end
 
-local function assembly_name(csproj)
-	local ok, lines = pcall(vim.fn.readfile, csproj)
-	if ok then
-		local name = table.concat(lines, "\n"):match("<AssemblyName>%s*(.-)%s*</AssemblyName>")
-		if name and name ~= "" then
-			return name
-		end
+-- A directory given as the project stands for the .csproj inside it.
+local function as_csproj(project)
+	if project and vim.fn.isdirectory(project) == 1 then
+		return namespace.find_csproj(project, project) or project
 	end
-	return vim.fn.fnamemodify(csproj, ":t:r")
+	return project
+end
+
+-- The name the project is shown under ("My.Api" for My.Api.csproj).
+local function project_label(project)
+	if vim.fn.isdirectory(project) == 1 then
+		return vim.fn.fnamemodify(project, ":t")
+	end
+	return vim.fn.fnamemodify(project, ":t:r")
+end
+
+-- <AssemblyName>, defaulting to the project file name. nil when it is an
+-- MSBuild expression that cannot be evaluated here.
+local function assembly_name(project)
+	local csproj = as_csproj(project)
+	local label = project_label(csproj)
+	if vim.fn.isdirectory(csproj) == 1 then
+		return label
+	end
+	local ok, lines = pcall(vim.fn.readfile, csproj)
+	if not ok then
+		return label
+	end
+	local name = table.concat(lines, "\n"):match("<AssemblyName>%s*(.-)%s*</AssemblyName>")
+	if not name or name == "" then
+		return label
+	end
+	name = name:gsub("%$%(MSBuildProjectName%)", function()
+		return label
+	end)
+	if name:find("$(", 1, true) then
+		return nil
+	end
+	return name
+end
+
+-- Sorted names of the files and of the directories directly inside dir.
+-- Reads the directory rather than globbing: 'wildignore' commonly lists
+-- *.dll or */bin/*, which would hide the very files being looked for.
+local function list_dir(dir)
+	local files, dirs = {}, {}
+	local handle = vim.uv.fs_scandir(dir)
+	while handle do
+		local name, kind = vim.uv.fs_scandir_next(handle)
+		if not name then
+			break
+		end
+		if kind ~= "file" and kind ~= "directory" then
+			-- symlink, or a filesystem that does not report the type
+			local stat = vim.uv.fs_stat(dir .. "/" .. name)
+			kind = stat and stat.type or "file"
+		end
+		table.insert(kind == "directory" and dirs or files, name)
+	end
+	table.sort(files)
+	table.sort(dirs)
+	return files, dirs
 end
 
 -- Find the built dll for a project (.csproj path or directory), honoring
 -- dap.configuration (default "Debug") and RID-specific output folders.
 local function find_dll(project, configuration)
 	configuration = configuration or dap_config().configuration or "Debug"
-	local dir = project_dir(project)
-	local name = vim.fn.isdirectory(project) == 1 and vim.fn.fnamemodify(project, ":t:r")
-		or assembly_name(project)
-	local base = dir .. "/bin/" .. configuration
-	-- bin/<cfg>/<tfm>/<name>.dll
-	local matches = vim.fn.glob(base .. "/*/" .. name .. ".dll", false, true)
-	if #matches > 0 then
-		return M.pick_newest_tfm(matches)
+	local base = project_dir(project) .. "/bin/" .. configuration
+
+	-- bin/<cfg>/<tfm>/ first, then bin/<cfg>/<tfm>/<rid>/ (RID-specific builds)
+	local levels = { {}, {} }
+	local _, tfms = list_dir(base)
+	for _, tfm in ipairs(tfms) do
+		local tfm_dir = base .. "/" .. tfm
+		table.insert(levels[1], tfm_dir)
+		local _, rids = list_dir(tfm_dir)
+		for _, rid in ipairs(rids) do
+			table.insert(levels[2], tfm_dir .. "/" .. rid)
+		end
 	end
-	-- bin/<cfg>/<tfm>/<rid>/<name>.dll (RID-specific builds)
-	matches = vim.fn.glob(base .. "/*/*/" .. name .. ".dll", false, true)
-	if #matches > 0 then
-		return M.pick_newest_tfm(matches)
+
+	local name = assembly_name(project)
+	if name then
+		for _, dirs in ipairs(levels) do
+			local matches = {}
+			for _, dir in ipairs(dirs) do
+				local dll = dir .. "/" .. name .. ".dll"
+				if vim.uv.fs_stat(dll) then
+					table.insert(matches, dll)
+				end
+			end
+			if #matches > 0 then
+				return M.pick_newest_tfm(matches)
+			end
+		end
 	end
-	-- fall back to any dll under the newest tfm
-	matches = vim.fn.glob(base .. "/*/*.dll", false, true)
-	if #matches > 0 then
-		return M.pick_newest_tfm(matches)
+
+	-- The name did not match (it is set somewhere else, e.g. in
+	-- Directory.Build.props). Only a launchable assembly has a
+	-- runtimeconfig.json next to it; every other dll is a dependency.
+	for _, dirs in ipairs(levels) do
+		local matches = {}
+		for _, dir in ipairs(dirs) do
+			for _, file in ipairs((list_dir(dir))) do
+				local stem = file:match("^(.*)%.runtimeconfig%.json$")
+				if stem and vim.uv.fs_stat(dir .. "/" .. stem .. ".dll") then
+					table.insert(matches, dir .. "/" .. stem .. ".dll")
+				end
+			end
+		end
+		if #matches > 0 then
+			return M.pick_newest_tfm(matches)
+		end
 	end
-	return M.pick_newest_tfm(vim.fn.glob(base .. "/*/*/*.dll", false, true))
+	return nil
 end
 
 function M.resolve_dll(project)
@@ -127,24 +213,6 @@ local function runnable_projects()
 		end
 	end
 	return list
-end
-
--- Non-interactive: the current project if it is runnable, else the only
--- runnable project in the workspace, else nil. Never prompts, so it is safe
--- to call from a dap provider (which runs before the user picks a config).
-local function current_runnable_project()
-	local current = reference.current_project()
-	if current then
-		current = dotnet.normalize(current)
-		if dotnet.is_runnable(current) then
-			return current
-		end
-	end
-	local runnable = runnable_projects()
-	if #runnable == 1 then
-		return runnable[1]
-	end
-	return nil
 end
 
 -- Non-interactive profile resolution for the provider path: applies the single
@@ -186,7 +254,7 @@ function M.with_launch_profile(project, cfg, cb)
 		if choice then
 			cb(choice.env, choice.args)
 		else
-			vim.notify("csnew: debug launch cancelled", vim.log.levels.INFO)
+			vim.notify("dotnetkit: debug launch cancelled", vim.log.levels.INFO)
 		end
 	end)
 end
@@ -294,13 +362,23 @@ local function port_owner(port)
 		return nil
 	end
 
+	-- /proc/<pid>/cmdline is NUL-separated: prefer the dll being hosted
+	-- ("dotnet App.dll"), else the name of the executable itself.
 	local name
-	local cmdline = "/proc/" .. pid .. "/cmdline"
-	if vim.fn.filereadable(cmdline) == 1 then
-		local ok, lines = pcall(vim.fn.readfile, cmdline, "b")
-		if ok and lines and lines[1] then
-			name = lines[1]:gsub("%z", " "):match("([^/ ]+%.dll)") or lines[1]:gsub("%z.*", "")
+	local file = io.open("/proc/" .. pid .. "/cmdline", "rb")
+	if file then
+		local raw = file:read("*a") or ""
+		file:close()
+		local executable
+		for arg in raw:gmatch("[^%z]+") do
+			executable = executable or arg:match("[^/\\]+$")
+			local dll = arg:match("([^/\\]+%.dll)$")
+			if dll then
+				name = dll
+				break
+			end
 		end
+		name = name or executable
 	end
 	if not name then
 		name = capture({ "ps", "-p", tostring(pid), "-o", "comm=" })
@@ -333,7 +411,7 @@ local function free_port(pid, host, port)
 	if gone(3000) then
 		return true
 	end
-	vim.notify("csnew: pid " .. pid .. " ignored SIGTERM, forcing", vim.log.levels.WARN)
+	vim.notify("dotnetkit: pid " .. pid .. " ignored SIGTERM, forcing", vim.log.levels.WARN)
 	signal("-KILL")
 	return gone(2000)
 end
@@ -342,6 +420,7 @@ end
 -- middle of a debug session, which reads like a crash. Check first and offer
 -- the two things you actually want: attach to what is already there, or
 -- replace it. Disable with dap.port_check = false.
+-- cb(true) when the launch may go ahead, cb(false) when it must not.
 local function check_ports(env, cfg, cb)
 	if cfg.port_check == false then
 		cb(true)
@@ -371,23 +450,82 @@ local function check_ports(env, cfg, cb)
 		prompt = busy.url .. " is already in use" .. who .. ":",
 	}, function(choice)
 		if choice == "Attach to it instead" then
-			M.debug_attach()
+			cb(false)
+			-- The owner of the port is already known, so attach to it directly
+			-- instead of asking again. Deferred: the launch this replaces has
+			-- to unwind first.
+			vim.schedule(function()
+				M.debug_attach({ pid = pid })
+			end)
 		elseif choice == "Kill it and launch" then
 			if free_port(pid, busy.host, busy.port) then
 				cb(true)
 			else
-				vim.notify("csnew: port " .. busy.port .. " is still in use", vim.log.levels.ERROR)
+				vim.notify("dotnetkit: port " .. busy.port .. " is still in use", vim.log.levels.ERROR)
+				cb(false)
 			end
 		elseif choice == "Launch anyway" then
 			cb(true)
+		else
+			cb(false)
 		end
+	end)
+end
+
+local function launch_name(project)
+	return "dotnetkit: launch" .. (project and (" " .. project_label(project)) or "")
+end
+
+-- Build the project unless dap.build is off. cb(ok).
+local function build_project(project, cfg, cb)
+	if cfg.build == false then
+		cb(true)
+		return
+	end
+	build.run({
+		target = project,
+		configuration = cfg.configuration,
+		on_done = function(ok)
+			cb(ok) -- on failure build.run already notified and opened the quickfix
+		end,
+	})
+end
+
+-- The dll to launch, once the ports the profile binds are known to be free.
+-- cb(dll), or cb(nil) when the launch must not go ahead. With `ask`, a dll
+-- that cannot be found is asked for instead of being an error.
+local function locate_program(project, env, cfg, ask, cb)
+	local dll = find_dll(project, cfg.configuration)
+	if not dll and ask then
+		dll = M.resolve_dll(project)
+		if dll == "" then
+			cb(nil)
+			return
+		end
+	end
+	if not dll then
+		local configuration = cfg.configuration or "Debug"
+		vim.notify(
+			("dotnetkit: no %s dll found under %s/bin/%s%s"):format(
+				configuration,
+				project_dir(project),
+				configuration,
+				cfg.build == false and ", build the project first" or ""
+			),
+			vim.log.levels.ERROR
+		)
+		cb(nil)
+		return
+	end
+	check_ports(env, cfg, function(free)
+		cb(free and dll or nil)
 	end)
 end
 
 local function launch_dap_config(project, dll, env, args, cfg)
 	local config = {
 		type = "coreclr",
-		name = "dotnetkit: launch " .. vim.fn.fnamemodify(project, ":t:r"),
+		name = launch_name(project),
 		request = "launch",
 		program = dll,
 		cwd = project_dir(project),
@@ -405,32 +543,43 @@ end
 
 -- Launch config for the dap provider. Expensive/interactive fields stay lazy so
 -- nothing is resolved (or prompted) unless the user actually picks this config.
+-- Picking it goes through the same steps as :CsDebugRun: build, find the dll,
+-- check the profile's ports.
 function M.launch_configuration(project, cfg)
 	cfg = cfg or dap_config()
-	local label = project and vim.fn.fnamemodify(project, ":t:r") or nil
+	local env, args
+	if project then
+		env, args = auto_profile(project, cfg)
+	end
 	local config = {
 		type = "coreclr",
-		name = "dotnetkit: launch" .. (label and (" " .. label) or ""),
+		name = launch_name(project),
 		request = "launch",
 		program = function()
-			if project then
-				local dll = find_dll(project, cfg.configuration)
-				if dll then
-					return dll
-				end
+			local abort = require("dap").ABORT
+			if not project then
+				local dll = M.resolve_dll(nil)
+				return (dll and dll ~= "") and dll or abort
 			end
-			local dll = M.resolve_dll(project)
-			if not dll or dll == "" then
-				return require("dap").ABORT
-			end
-			return dll
+			-- nvim-dap resumes a coroutine returned here with its own and waits
+			-- to be resumed with the value, so the build does not block the editor
+			return coroutine.create(function(dap_co)
+				build_project(project, cfg, function(ok)
+					if not ok then
+						coroutine.resume(dap_co, abort)
+						return
+					end
+					locate_program(project, env, cfg, true, function(dll)
+						coroutine.resume(dap_co, dll or abort)
+					end)
+				end)
+			end)
 		end,
 		stopAtEntry = cfg.stop_at_entry or false,
 		justMyCode = cfg.just_my_code ~= false,
 	}
 	if project then
 		config.cwd = project_dir(project)
-		local env, args = auto_profile(project, cfg)
 		if env and next(env) then
 			config.env = env
 		end
@@ -441,29 +590,99 @@ function M.launch_configuration(project, cfg)
 	return config
 end
 
+-- The dotnet CLI, build servers and language servers all run on "dotnet" too,
+-- but none of them is the app. Attaching to `dotnet run` in particular looks
+-- right and never hits a breakpoint: the app is its child process.
+local SDK_VERBS = {
+	add = true,
+	build = true,
+	["build-server"] = true,
+	clean = true,
+	ef = true,
+	format = true,
+	list = true,
+	msbuild = true,
+	new = true,
+	nuget = true,
+	pack = true,
+	publish = true,
+	remove = true,
+	restore = true,
+	run = true,
+	sln = true,
+	test = true,
+	tool = true,
+	watch = true,
+}
+
+local TOOLING = {
+	"vbcscompiler",
+	"msbuild.dll",
+	"microsoft.codeanalysis.languageserver",
+	"omnisharp",
+	"csharplanguageserver",
+	"csharp-ls",
+	"netcoredbg",
+	"dotnet-watch",
+}
+
+local function is_tooling(cmdline)
+	local verb = cmdline:match("dotnet%s+([%a%-]+)")
+	if verb and SDK_VERBS[verb] then
+		return true
+	end
+	for _, name in ipairs(TOOLING) do
+		if cmdline:find(name, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Filter for the attach picker. `dotnet run` starts the app through its own
+-- executable (bin/Debug/net10.0/App), whose command line does not mention
+-- "dotnet" at all, so processes are matched against the assembly names of the
+-- workspace's runnable projects (or of `project` alone when given). Anything
+-- else hosted by the dotnet executable ("dotnet Other.dll") stays available,
+-- minus the tooling. A process that merely mentions dotnet in its arguments
+-- (a grep, an editor) is not a candidate.
+-- Kept public: pure matching, worth exercising on its own.
+function M.attach_filter(project)
+	local names = {}
+	local candidates = project and { project } or runnable_projects()
+	for _, p in ipairs(candidates) do
+		names[(assembly_name(p) or project_label(p)):lower()] = true
+	end
+	return function(proc)
+		local cmdline = (proc.name or ""):lower()
+		if is_tooling(cmdline) then
+			return false
+		end
+		local executable = true
+		for token in cmdline:gmatch("%S+") do
+			local base = (token:match("[^/\\]+$") or token):gsub("%.dll$", ""):gsub("%.exe$", "")
+			if names[base] or (executable and base == "dotnet") then
+				return true
+			end
+			executable = false
+		end
+		return false
+	end
+end
+
 -- Attach config: pick a live process (e.g. the one left by :CsRun / :CsWatch),
--- filtered to dotnet / this project's assembly name.
-function M.attach_configuration(project, cfg)
+-- or attach straight to `pid` when the caller already knows it.
+function M.attach_configuration(project, cfg, pid)
 	cfg = cfg or dap_config()
-	local hint = project and vim.fn.fnamemodify(project, ":t:r"):lower() or nil
 	return {
 		type = "coreclr",
 		name = "dotnetkit: attach",
 		request = "attach",
 		justMyCode = cfg.just_my_code ~= false,
-		processId = function()
+		processId = pid or function()
 			return require("dap.utils").pick_process({
 				prompt = "Attach to process:",
-				filter = function(proc)
-					local n = (proc.name or ""):lower()
-					if n:find("dotnet", 1, true) then
-						return true
-					end
-					if hint and n:find(hint, 1, true) then
-						return true
-					end
-					return false
-				end,
+				filter = M.attach_filter(project),
 			})
 		end,
 	}
@@ -657,19 +876,24 @@ function M.register()
 		return
 	end
 	local cfg = dap_config()
-	-- Adapter as a function: netcoredbg is resolved when a session actually
-	-- starts, so installing it mid-session (e.g. with Mason) needs no restart.
-	dap.adapters.coreclr = function(cb)
-		local dbg = M.netcoredbg_path()
-		if not dbg then
-			vim.notify("csnew: netcoredbg not found (:MasonInstall netcoredbg)", vim.log.levels.ERROR)
-			return
+	-- A coreclr adapter that is already there belongs to the user (or to
+	-- another plugin) and is left alone; the configurations below run on it.
+	if dap.adapters.coreclr == nil then
+		-- Adapter as a function: netcoredbg is resolved when a session actually
+		-- starts, so installing it mid-session (e.g. with Mason) needs no restart.
+		dap.adapters.coreclr = function(cb)
+			local dbg = M.netcoredbg_path()
+			if not dbg then
+				vim.notify("dotnetkit: netcoredbg not found (:MasonInstall netcoredbg)", vim.log.levels.ERROR)
+				return
+			end
+			cb({
+				type = "executable",
+				command = dbg,
+				args = { "--interpreter=vscode" },
+			})
 		end
-		cb({
-			type = "executable",
-			command = dbg,
-			args = { "--interpreter=vscode" },
-		})
+		own_adapter = true
 	end
 	dap.providers.configs["dotnetkit"] = function(bufnr)
 		return M.configurations(bufnr)
@@ -683,12 +907,13 @@ end
 function M.ensure()
 	local ok, dap = pcall(require, "dap")
 	if not ok then
-		vim.notify("csnew: nvim-dap is not installed", vim.log.levels.ERROR)
+		vim.notify("dotnetkit: nvim-dap is not installed", vim.log.levels.ERROR)
 		return nil
 	end
 	M.register()
-	if not M.netcoredbg_path() then
-		vim.notify("csnew: netcoredbg not found (:MasonInstall netcoredbg)", vim.log.levels.ERROR)
+	-- only our adapter needs netcoredbg; someone else's knows its own debugger
+	if own_adapter and not M.netcoredbg_path() then
+		vim.notify("dotnetkit: netcoredbg not found (:MasonInstall netcoredbg)", vim.log.levels.ERROR)
 		return nil
 	end
 	return dap
@@ -721,6 +946,34 @@ function M.setup(cfg)
 	})
 end
 
+-- Call cb once `session` is no longer nvim-dap's active session. Polls
+-- dap.session(), which every nvim-dap version has, and gives up waiting after
+-- five seconds so a debugger that ignores terminate cannot block the relaunch.
+local function when_session_ends(dap, session, cb)
+	local timer = vim.uv.new_timer()
+	if not timer then
+		cb()
+		return
+	end
+	local waited = 0
+	timer:start(
+		100,
+		100,
+		vim.schedule_wrap(function()
+			if timer:is_closing() then
+				return
+			end
+			waited = waited + 100
+			if dap.session() == session and waited < 5000 then
+				return
+			end
+			timer:stop()
+			timer:close()
+			cb()
+		end)
+	)
+end
+
 function M.debug_run(opts)
 	opts = opts or {}
 	local dap = M.ensure()
@@ -729,39 +982,40 @@ function M.debug_run(opts)
 	end
 	local cfg = dap_config()
 
-	local function start(project, env, args)
-		local dll = find_dll(project, cfg.configuration)
-		if not dll then
-			vim.notify(
-				"csnew: no " .. (cfg.configuration or "Debug") .. " dll found, build the project first",
-				vim.log.levels.ERROR
-			)
-			return
-		end
-		check_ports(env, cfg, function()
-			dap.run(launch_dap_config(project, dll, env, args, cfg))
+	local function launch(project)
+		build_project(project, cfg, function(ok)
+			if not ok then
+				return
+			end
+			M.with_launch_profile(project, cfg, function(env, args)
+				locate_program(project, env, cfg, false, function(dll)
+					if dll then
+						dap.run(launch_dap_config(project, dll, env, args, cfg))
+					end
+				end)
+			end)
 		end)
 	end
 
-	local function launch(project)
-		local function after_build(ok)
-			if not ok then
-				return -- build.run already opened quickfix and notified
-			end
-			M.with_launch_profile(project, cfg, function(env, args)
-				start(project, env, args)
+	run.resolve_runnable("Debug project:", opts.project, function(project)
+		project = as_csproj(project)
+		-- Running the project that is already being debugged means "restart".
+		-- End that session first: otherwise the port check finds our own
+		-- debuggee and asks what to do about it.
+		local active = dap.session()
+		if active and active.config and active.config.name == launch_name(project) then
+			dap.terminate()
+			when_session_ends(dap, active, function()
+				launch(project)
 			end)
+			return
 		end
-		if cfg.build == false then
-			after_build(true)
-		else
-			build.run({ target = project, on_done = after_build })
-		end
-	end
-
-	run.resolve_runnable("Debug project:", opts.project, launch)
+		launch(project)
+	end)
 end
 
+-- opts.project restricts the process picker to that project's assembly;
+-- opts.pid attaches to a known process without asking.
 function M.debug_attach(opts)
 	opts = opts or {}
 	local dap = M.ensure()
@@ -769,17 +1023,17 @@ function M.debug_attach(opts)
 		return
 	end
 	local cfg = dap_config()
-	local project = current_runnable_project()
+	local project
 	if opts.project and opts.project ~= "" then
-		project = dotnet.normalize(opts.project)
+		project = as_csproj(dotnet.normalize(opts.project))
 	end
-	dap.run(M.attach_configuration(project, cfg))
+	dap.run(M.attach_configuration(project, cfg, opts.pid))
 end
 
 function M.debug_stop()
 	local dap = package.loaded["dap"]
 	if not dap then
-		vim.notify("csnew: no active debug session", vim.log.levels.INFO)
+		vim.notify("dotnetkit: no active debug session", vim.log.levels.INFO)
 		return
 	end
 	dap.terminate()

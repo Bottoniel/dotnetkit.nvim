@@ -1,0 +1,205 @@
+*dotnetkit.txt*      Day-to-day .NET work from Neovim (C#, NuGet, EF, debug)
+
+==============================================================================
+CONTENTS                                                           *dotnetkit*
+
+  1. Introduction ................................ |dotnetkit-introduction|
+  2. Setup ....................................... |dotnetkit-setup|
+  3. Commands .................................... |dotnetkit-commands|
+  4. Configuration ............................... |dotnetkit-configuration|
+  5. Per-repo configuration ...................... |dotnetkit-repo-config|
+  6. Debugging ................................... |dotnetkit-debug|
+  7. Snippets .................................... |dotnetkit-snippets|
+  8. Health ...................................... |dotnetkit-health|
+
+==============================================================================
+1. INTRODUCTION                                       *dotnetkit-introduction*
+
+dotnetkit creates C# types, manages solutions, project references and NuGet
+packages, drives Entity Framework migrations, builds into the quickfix list,
+runs projects in a terminal and debugs them through nvim-dap.
+
+Requires Neovim 0.10+ and the .NET SDK (`dotnet` on `$PATH`). Everything else
+is optional and only needed for the feature that uses it:
+
+  dotnet-ef ................. the `:Ef*` commands
+  LuaSnip ................... snippets
+  nvim-dap + netcoredbg ..... debugging
+  nvim-dap-ui + nvim-nio .... debug UI
+
+The Lua module is `csnew`; `require("dotnetkit")` is an alias for it.
+
+==============================================================================
+2. SETUP                                                     *dotnetkit-setup*
+
+With lazy.nvim: >lua
+    {
+      "Bottoniel/dotnetkit.nvim",
+      ft = "cs",
+      dependencies = { "L3MON4D3/LuaSnip" },
+      opts = {},
+    }
+<
+`opts = {}` makes lazy.nvim call `require("csnew").setup({})`, which registers
+the snippets and the debug wiring. The commands exist without it.
+
+==============================================================================
+3. COMMANDS                                               *dotnetkit-commands*
+
+Every argument is optional; what is missing is asked for with
+|vim.ui.select()| or |vim.ui.input()|.
+
+                                                                      *:CsNew*
+:CsNew [kind] [name]    Create a C# type in the directory of the current
+                        buffer. Kinds: class, interface, record, enum,
+                        controller, exception. The namespace comes from the
+                        nearest `.csproj`, and the syntax follows the
+                        project's C# version (see |dotnetkit-snippets|).
+
+                                                               *:CsNewProject*
+:CsNewProject [template] [name] [outdir]
+                        `dotnet new`, then offers to add the project to the
+                        solution.
+
+                                                    *:CsAddRef* *:CsRemoveRef*
+:CsAddRef [project] [reference]
+:CsRemoveRef [project] [reference]
+                        `dotnet add|remove reference` on the current project.
+
+                                                    *:CsSlnAdd* *:CsSlnRemove*
+:CsSlnAdd [project]
+:CsSlnRemove [project]  `dotnet sln add|remove`; `.sln` and `.slnx`.
+
+                        *:CsAddPkg* *:CsRemovePkg* *:CsUpdatePkg* *:CsListPkg*
+:CsAddPkg [name] [version]
+:CsRemovePkg [name]
+:CsUpdatePkg [name] [version]
+:CsListPkg [project]    NuGet packages of the current project. |:CsListPkg|
+                        shows installed and latest versions in a scratch
+                        buffer.
+
+                                                                    *:CsBuild*
+:CsBuild [target]       `dotnet build` of the solution (or the given target);
+                        errors and warnings go to the |quickfix| list.
+
+                                                 *:CsRun* *:CsWatch* *:CsStop*
+:CsRun [project]
+:CsWatch [project]      `dotnet run` / `dotnet watch run` in a terminal split,
+                        with a picker when `launchSettings.json` has several
+                        profiles.
+:CsStop                 Stop that job and close its terminal.
+
+                               *:CsDebugRun* *:CsDebugAttach* *:CsDebugStop*
+:CsDebugRun [project]
+:CsDebugAttach [project]
+:CsDebugStop            See |dotnetkit-debug|.
+
+                   *:EfMigrate* *:EfUpdate* *:EfRemove* *:EfList* *:EfScript*
+:EfMigrate [name]       `dotnet ef migrations add`
+:EfUpdate [target]      `dotnet ef database update` (empty = latest,
+                        0 = revert all)
+:EfRemove               `dotnet ef migrations remove`
+:EfList                 `dotnet ef migrations list` in a scratch buffer
+:EfScript               `dotnet ef migrations script` into `Migrations.sql`
+
+After a solution, reference or package change the steps in
+`dotnet.after_change` run on the solution.
+
+==============================================================================
+4. CONFIGURATION                                     *dotnetkit-configuration*
+
+Defaults: >lua
+    require("csnew").setup({
+      dotnet = {
+        -- steps after a sln / reference / package change.
+        -- "clean" is also valid; {} disables them all.
+        after_change = { "restore", "lsp_restart" },
+      },
+      ef = {
+        project = nil,          -- migrations project (--project)
+        startup_project = nil,  -- startup project (--startup-project)
+        context = nil,          -- DbContext (--context)
+        output_dir = nil,       -- migrations folder (--output-dir)
+        script_output = nil,    -- file written by :EfScript
+        script_idempotent = true,
+      },
+      dap = {
+        ui = "auto",            -- manage nvim-dap-ui unless you wired it
+        build = true,           -- build before launching
+        profile = true,         -- apply launchSettings.json (env + args)
+        port_check = true,      -- check the profile's port before launching
+        configuration = "Debug",
+        keymaps = false,        -- or a prefix such as "<leader>d"
+        netcoredbg = nil,       -- explicit path; default: Mason, then $PATH
+        stop_at_entry = false,
+        just_my_code = true,
+      },
+    })
+<
+Sections merge key by key with the defaults; lists replace them.
+
+"lsp_restart" restarts the C# language server only (roslyn, OmniSharp,
+csharp-ls); other servers keep running.
+
+==============================================================================
+5. PER-REPO CONFIGURATION                              *dotnetkit-repo-config*
+
+A `.csnew.lua` at the git root overrides |dotnetkit-setup| for that repository
+(defaults < setup() < .csnew.lua). It has the same shape: >lua
+    return {
+      ef = {
+        project = "src/Shop.Infrastructure",
+        startup_project = "src/Shop.Web",
+      },
+    }
+<
+Neovim asks you to trust the file first (see |vim.secure.read()|). It is
+evaluated in an empty environment: it can only return a table.
+
+==============================================================================
+6. DEBUGGING                                                 *dotnetkit-debug*
+
+Needs nvim-dap and netcoredbg. dotnetkit registers the `coreclr` adapter
+(unless one is already registered) and a configuration provider, so
+`require("dap").continue()` offers `dotnetkit: launch <Project>` and
+`dotnetkit: attach`.
+
+:CsDebugRun [project]   Build the project, apply the launch profile, check
+                        that the profile's port is free, then launch with the
+                        project directory as cwd. A failed build stops there
+                        with the errors in the quickfix list. Running it again
+                        for the project being debugged restarts the session.
+
+:CsDebugAttach [project]
+                        Attach to a running .NET process. The picker lists
+                        the apps of the workspace's runnable projects and
+                        other dotnet-hosted processes, without the dotnet
+                        CLI, build servers and language servers.
+
+:CsDebugStop            Terminate the session.
+
+If the profile's port is taken, a prompt offers to attach to the process
+holding it, to kill it and launch, or to launch anyway.
+
+netcoredbg does not implement `runInTerminal`: the app's output goes to the
+nvim-dap REPL, not to the dap-ui console.
+
+==============================================================================
+7. SNIPPETS                                               *dotnetkit-snippets*
+
+With LuaSnip, in a `cs` buffer: `cls`, `iface`, `rec`, `enm`, `ctrl`, `exc`.
+The type is named after the file and the namespace is inferred, as in
+|:CsNew|.
+
+Both follow the project's C# version, read from `<LangVersion>` or the target
+framework: block namespaces before C# 10, a classic constructor for
+exceptions before C# 12. A project that does not state its target gets modern
+syntax.
+
+==============================================================================
+8. HEALTH                                                   *dotnetkit-health*
+
+`:checkhealth csnew` reports on dotnet, dotnet-ef, nvim-dap, nvim-dap-ui,
+netcoredbg, LuaSnip and the per-repo configuration.
+
+ vim:tw=78:ts=8:et:ft=help:norl:

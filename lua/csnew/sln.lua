@@ -16,7 +16,7 @@ function M.add(opts)
 		if opts.project and opts.project ~= "" then
 			local project = dotnet.normalize(opts.project)
 			if vim.fn.filereadable(project) ~= 1 then
-				vim.notify("csnew: project not found " .. project, vim.log.levels.ERROR)
+				vim.notify("dotnetkit: project not found " .. project, vim.log.levels.ERROR)
 				return
 			end
 			dotnet.run({ "sln", sln, "add", project }, function(ok)
@@ -24,7 +24,7 @@ function M.add(opts)
 					dotnet.invalidate_cache()
 					dotnet.post_change(sln)
 				end
-			end, { success_msg = "csnew: added to solution " .. vim.fn.fnamemodify(project, ":t") })
+			end, { success_msg = "dotnetkit: added to solution " .. vim.fn.fnamemodify(project, ":t") })
 			return
 		end
 
@@ -41,7 +41,7 @@ function M.add(opts)
 		end
 
 		if #candidates == 0 then
-			vim.notify("csnew: all projects already in solution", vim.log.levels.WARN)
+			vim.notify("dotnetkit: all projects already in solution", vim.log.levels.WARN)
 			return
 		end
 
@@ -57,7 +57,7 @@ function M.add(opts)
 						dotnet.invalidate_cache()
 						dotnet.post_change(sln)
 					end
-				end, { success_msg = "csnew: added to solution " .. vim.fn.fnamemodify(choice, ":t") })
+				end, { success_msg = "dotnetkit: added to solution " .. vim.fn.fnamemodify(choice, ":t") })
 			end
 		end)
 	end)
@@ -68,7 +68,7 @@ function M.remove(opts)
 	resolve_sln(opts.sln, function(sln)
 		local current = dotnet.sln_projects(sln)
 		if #current == 0 then
-			vim.notify("csnew: solution has no projects", vim.log.levels.WARN)
+			vim.notify("dotnetkit: solution has no projects", vim.log.levels.WARN)
 			return
 		end
 
@@ -79,7 +79,7 @@ function M.remove(opts)
 					dotnet.invalidate_cache()
 					dotnet.post_change(sln)
 				end
-			end, { success_msg = "csnew: removed from solution " .. vim.fn.fnamemodify(project, ":t") })
+			end, { success_msg = "dotnetkit: removed from solution " .. vim.fn.fnamemodify(project, ":t") })
 			return
 		end
 
@@ -95,7 +95,7 @@ function M.remove(opts)
 						dotnet.invalidate_cache()
 						dotnet.post_change(sln)
 					end
-				end, { success_msg = "csnew: removed from solution " .. choice.name })
+				end, { success_msg = "dotnetkit: removed from solution " .. choice.name })
 			end
 		end)
 	end)
